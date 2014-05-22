@@ -17,11 +17,11 @@ Yamux uses a streaming connection underneath, but imposes a message
 framing so that it can be shared between many logical streams. Each
 frame contains a header like:
 
-<Version> (4 bits)
-<Type> (4 bits)
-<Flags> (8 bits)
-<StreamID> (32 bits)
-<Length> (32 bits)
+* Version (4 bits)
+* Type (4 bits)
+* Flags (8 bits)
+* StreamID (32 bits)
+* Length (32 bits)
 
 This means that each header has a 10 byte overhead. Each field
 is described below:
