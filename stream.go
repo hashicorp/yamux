@@ -5,7 +5,6 @@ import (
 	"compress/lzw"
 	"io"
 	"log"
-	"net"
 	"sync"
 	"time"
 )
@@ -275,16 +274,6 @@ func (s *Stream) forceClose() {
 	defer s.lock.Unlock()
 	s.state = streamClosed
 	asyncNotify(s.notifyCh)
-}
-
-// LocalAddr returns the local address
-func (s *Stream) LocalAddr() net.Addr {
-	return s.session.LocalAddr()
-}
-
-// LocalAddr returns the remote address
-func (s *Stream) RemoteAddr() net.Addr {
-	return s.session.RemoteAddr()
 }
 
 // SetDeadline sets the read and write deadlines

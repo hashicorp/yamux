@@ -5,6 +5,47 @@ import (
 	"fmt"
 )
 
+var (
+	// ErrInvalidVersion means we received a frame with an
+	// invalid version
+	ErrInvalidVersion = fmt.Errorf("invalid protocol version")
+
+	// ErrInvalidMsgType means we received a frame with an
+	// invalid message type
+	ErrInvalidMsgType = fmt.Errorf("invalid msg type")
+
+	// ErrSessionShutdown is used if there is a shutdown during
+	// an operation
+	ErrSessionShutdown = fmt.Errorf("session shutdown")
+
+	// ErrStreamsExhausted is returned if we have no more
+	// stream ids to issue
+	ErrStreamsExhausted = fmt.Errorf("streams exhausted")
+
+	// ErrDuplicateStream is used if a duplicate stream is
+	// opened inbound
+	ErrDuplicateStream = fmt.Errorf("duplicate stream initiated")
+
+	// ErrMissingStream indicates a stream was named which
+	// does not exist.
+	ErrMissingStream = fmt.Errorf("missing stream references")
+
+	// ErrReceiveWindowExceeded indicates the window was exceeded
+	ErrRecvWindowExceeded = fmt.Errorf("recv window exceeded")
+
+	// ErrTimeout is used when we reach an IO deadline
+	ErrTimeout = fmt.Errorf("i/o deadline reached")
+
+	// ErrStreamClosed is returned when using a closed stream
+	ErrStreamClosed = fmt.Errorf("stream closed")
+
+	// ErrUnexpectedFlag is set when we get an unexpected flag
+	ErrUnexpectedFlag = fmt.Errorf("unexpected flag")
+
+	// ErrRemoteGoAway is used when we get a go away from the other side
+	ErrRemoteGoAway = fmt.Errorf("remote end is not accepting connections")
+)
+
 const (
 	// protoVersion is the only version we support
 	protoVersion uint8 = 0

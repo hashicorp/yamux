@@ -9,47 +9,6 @@ import (
 	"time"
 )
 
-var (
-	// ErrInvalidVersion means we received a frame with an
-	// invalid version
-	ErrInvalidVersion = fmt.Errorf("invalid protocol version")
-
-	// ErrInvalidMsgType means we received a frame with an
-	// invalid message type
-	ErrInvalidMsgType = fmt.Errorf("invalid msg type")
-
-	// ErrSessionShutdown is used if there is a shutdown during
-	// an operation
-	ErrSessionShutdown = fmt.Errorf("session shutdown")
-
-	// ErrStreamsExhausted is returned if we have no more
-	// stream ids to issue
-	ErrStreamsExhausted = fmt.Errorf("streams exhausted")
-
-	// ErrDuplicateStream is used if a duplicate stream is
-	// opened inbound
-	ErrDuplicateStream = fmt.Errorf("duplicate stream initiated")
-
-	// ErrMissingStream indicates a stream was named which
-	// does not exist.
-	ErrMissingStream = fmt.Errorf("missing stream references")
-
-	// ErrReceiveWindowExceeded indicates the window was exceeded
-	ErrRecvWindowExceeded = fmt.Errorf("recv window exceeded")
-
-	// ErrTimeout is used when we reach an IO deadline
-	ErrTimeout = fmt.Errorf("i/o deadline reached")
-
-	// ErrStreamClosed is returned when using a closed stream
-	ErrStreamClosed = fmt.Errorf("stream closed")
-
-	// ErrUnexpectedFlag is set when we get an unexpected flag
-	ErrUnexpectedFlag = fmt.Errorf("unexpected flag")
-
-	// ErrRemoteGoAway is used when we get a go away from the other side
-	ErrRemoteGoAway = fmt.Errorf("remote end is not accepting connections")
-)
-
 // Session is used to wrap a reliable ordered connection and to
 // multiplex it into multiple streams.
 type Session struct {
@@ -95,25 +54,6 @@ type Session struct {
 	shutdownErr  error
 	shutdownCh   chan struct{}
 	shutdownLock sync.Mutex
-}
-
-// hasAddr is used to get the address from the underlying connection
-type hasAddr interface {
-	LocalAddr() net.Addr
-	RemoteAddr() net.Addr
-}
-
-// yamuxAddr is used when we cannot get the underlying address
-type yamuxAddr struct {
-	Addr string
-}
-
-func (*yamuxAddr) Network() string {
-	return "yamux"
-}
-
-func (y *yamuxAddr) String() string {
-	return fmt.Sprintf("yamux:%s", y.Addr)
 }
 
 // sendReady is used to either mark a stream as ready
@@ -233,31 +173,6 @@ func (s *Session) GoAway() error {
 	s.localGoAway = true
 	s.goAway(goAwayNormal)
 	return nil
-}
-
-// Addr is used to get the address of the listener.
-func (s *Session) Addr() net.Addr {
-	return s.LocalAddr()
-}
-
-// LocalAddr is used to get the local address of the
-// underlying connection.
-func (s *Session) LocalAddr() net.Addr {
-	addr, ok := s.conn.(hasAddr)
-	if !ok {
-		return &yamuxAddr{"local"}
-	}
-	return addr.LocalAddr()
-}
-
-// RemoteAddr is used to get the address of remote end
-// of the underlying connection
-func (s *Session) RemoteAddr() net.Addr {
-	addr, ok := s.conn.(hasAddr)
-	if !ok {
-		return &yamuxAddr{"remote"}
-	}
-	return addr.RemoteAddr()
 }
 
 // Ping is used to measure the RTT response time
