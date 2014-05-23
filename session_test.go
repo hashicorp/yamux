@@ -2,7 +2,9 @@ package yamux
 
 import (
 	"io"
+	"sync"
 	"testing"
+	"time"
 )
 
 type pipeConn struct {
@@ -51,5 +53,232 @@ func TestPing(t *testing.T) {
 	}
 	if rtt == 0 {
 		t.Fatalf("bad: %v", rtt)
+	}
+}
+
+func TestAccept(t *testing.T) {
+	conn1, conn2 := testConn()
+	client := Client(conn1, nil)
+	defer client.Close()
+
+	server := Server(conn2, nil)
+	defer server.Close()
+
+	wg := &sync.WaitGroup{}
+	wg.Add(4)
+
+	go func() {
+		defer wg.Done()
+		stream, err := server.AcceptStream()
+		if err != nil {
+			t.Fatalf("err: %v", err)
+		}
+		if id := stream.StreamID(); id != 1 {
+			t.Fatalf("bad: %v", id)
+		}
+		if err := stream.Close(); err != nil {
+			t.Fatalf("err: %v", err)
+		}
+	}()
+
+	go func() {
+		defer wg.Done()
+		stream, err := client.AcceptStream()
+		if err != nil {
+			t.Fatalf("err: %v", err)
+		}
+		if id := stream.StreamID(); id != 2 {
+			t.Fatalf("bad: %v", id)
+		}
+		if err := stream.Close(); err != nil {
+			t.Fatalf("err: %v", err)
+		}
+	}()
+
+	go func() {
+		defer wg.Done()
+		stream, err := server.Open()
+		if err != nil {
+			t.Fatalf("err: %v", err)
+		}
+		if id := stream.StreamID(); id != 2 {
+			t.Fatalf("bad: %v", id)
+		}
+		if err := stream.Close(); err != nil {
+			t.Fatalf("err: %v", err)
+		}
+	}()
+
+	go func() {
+		defer wg.Done()
+		stream, err := client.Open()
+		if err != nil {
+			t.Fatalf("err: %v", err)
+		}
+		if id := stream.StreamID(); id != 1 {
+			t.Fatalf("bad: %v", id)
+		}
+		if err := stream.Close(); err != nil {
+			t.Fatalf("err: %v", err)
+		}
+	}()
+
+	doneCh := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(doneCh)
+	}()
+
+	select {
+	case <-doneCh:
+	case <-time.After(time.Second):
+		panic("timeout")
+	}
+}
+
+func TestSendData_Small(t *testing.T) {
+	conn1, conn2 := testConn()
+	client := Client(conn1, nil)
+	defer client.Close()
+
+	server := Server(conn2, nil)
+	defer server.Close()
+
+	wg := &sync.WaitGroup{}
+	wg.Add(2)
+
+	go func() {
+		defer wg.Done()
+		stream, err := server.AcceptStream()
+		if err != nil {
+			t.Fatalf("err: %v", err)
+		}
+
+		buf := make([]byte, 4)
+		for i := 0; i < 1000; i++ {
+			n, err := stream.Read(buf)
+			if err != nil {
+				t.Fatalf("err: %v", err)
+			}
+			if n != 4 {
+				t.Fatalf("short read: %d", n)
+			}
+			if string(buf) != "test" {
+				t.Fatalf("bad: %s", buf)
+			}
+		}
+
+		if err := stream.Close(); err != nil {
+			t.Fatalf("err: %v", err)
+		}
+	}()
+
+	go func() {
+		defer wg.Done()
+		stream, err := client.Open()
+		if err != nil {
+			t.Fatalf("err: %v", err)
+		}
+
+		for i := 0; i < 1000; i++ {
+			n, err := stream.Write([]byte("test"))
+			if err != nil {
+				t.Fatalf("err: %v", err)
+			}
+			if n != 4 {
+				t.Fatalf("short write %d", n)
+			}
+		}
+
+		if err := stream.Close(); err != nil {
+			t.Fatalf("err: %v", err)
+		}
+	}()
+
+	doneCh := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(doneCh)
+	}()
+	select {
+	case <-doneCh:
+	case <-time.After(time.Second):
+		panic("timeout")
+	}
+}
+
+func TestSendData_Large(t *testing.T) {
+	conn1, conn2 := testConn()
+	client := Client(conn1, nil)
+	defer client.Close()
+
+	server := Server(conn2, nil)
+	defer server.Close()
+
+	data := make([]byte, 512*1024)
+	for idx := range data {
+		data[idx] = byte(idx % 256)
+	}
+
+	wg := &sync.WaitGroup{}
+	wg.Add(2)
+
+	go func() {
+		defer wg.Done()
+		stream, err := server.AcceptStream()
+		if err != nil {
+			t.Fatalf("err: %v", err)
+		}
+
+		buf := make([]byte, 4*1024)
+		for i := 0; i < 128; i++ {
+			n, err := stream.Read(buf)
+			if err != nil {
+				t.Fatalf("err: %v", err)
+			}
+			if n != 4*1024 {
+				t.Fatalf("short read: %d", n)
+			}
+			for idx := range buf {
+				if buf[idx] != byte(idx%256) {
+					t.Fatalf("bad: %v %v %v", i, idx, buf[idx])
+				}
+			}
+		}
+
+		if err := stream.Close(); err != nil {
+			t.Fatalf("err: %v", err)
+		}
+	}()
+
+	go func() {
+		defer wg.Done()
+		stream, err := client.Open()
+		if err != nil {
+			t.Fatalf("err: %v", err)
+		}
+
+		n, err := stream.Write(data)
+		if err != nil {
+			t.Fatalf("err: %v", err)
+		}
+		if n != len(data) {
+			t.Fatalf("short write %d", n)
+		}
+
+		if err := stream.Close(); err != nil {
+			t.Fatalf("err: %v", err)
+		}
+	}()
+
+	doneCh := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(doneCh)
+	}()
+	select {
+	case <-doneCh:
+	case <-time.After(time.Second):
+		panic("timeout")
 	}
 }
