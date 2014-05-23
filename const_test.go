@@ -47,4 +47,8 @@ func TestConst(t *testing.T) {
 	if goAwayInternalErr != 2 {
 		t.Fatalf("bad: %v", goAwayInternalErr)
 	}
+
+	if headerSize != 12 {
+		t.Fatalf("bad header size")
+	}
 }

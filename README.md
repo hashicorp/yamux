@@ -17,14 +17,15 @@ Yamux uses a streaming connection underneath, but imposes a message
 framing so that it can be shared between many logical streams. Each
 frame contains a header like:
 
-* Version (4 bits)
-* Type (4 bits)
-* Flags (8 bits)
+* Version (8 bits)
+* Type (8 bits)
+* Flags (16 bits)
 * StreamID (32 bits)
 * Length (32 bits)
 
-This means that each header has a 10 byte overhead. Each field
-is described below:
+This means that each header has a 12 byte overhead.
+All fields are encoded in network order (big endian).
+Each field is described below:
 
 ## Version Field
 
@@ -53,10 +54,10 @@ The flags field is used to provide additional information related
 to the message type. The following flags are supported:
 
 * 0x1 SYN - Signals the start of a new stream. May be sent with a data or
-  window update message.
+  window update message. Also sent with a ping to indicate outbound.
 
 * 0x2 ACK - Acknowledges the start of a new stream. May be sent with a data
-  or window update message.
+  or window update message. Also sent with a ping to indicate response.
 
 * 0x4 FIN - Performs a half-close of a new stream. May be sent with a data
   message or window update.
