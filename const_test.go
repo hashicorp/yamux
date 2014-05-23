@@ -52,3 +52,24 @@ func TestConst(t *testing.T) {
 		t.Fatalf("bad header size")
 	}
 }
+
+func TestEncodeDecode(t *testing.T) {
+	hdr := header(make([]byte, headerSize))
+	hdr.encode(typeWindowUpdate, flagACK|flagLZW, 1234, 4321)
+
+	if hdr.Version() != protoVersion {
+		t.Fatalf("bad: %v", hdr)
+	}
+	if hdr.MsgType() != typeWindowUpdate {
+		t.Fatalf("bad: %v", hdr)
+	}
+	if hdr.Flags() != flagACK|flagLZW {
+		t.Fatalf("bad: %v", hdr)
+	}
+	if hdr.StreamID() != 1234 {
+		t.Fatalf("bad: %v", hdr)
+	}
+	if hdr.Length() != 4321 {
+		t.Fatalf("bad: %v", hdr)
+	}
+}
