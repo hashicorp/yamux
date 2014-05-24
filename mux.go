@@ -1,6 +1,7 @@
 package yamux
 
 import (
+	"fmt"
 	"io"
 	"time"
 )
@@ -22,10 +23,6 @@ type Config struct {
 	// KeepAliveInterval is how often to perform the keep alive
 	KeepAliveInterval time.Duration
 
-	// MaxSessionWindowSize is used to control the maximum
-	// window size that we allow for a session.
-	MaxSessionWindowSize uint32
-
 	// MaxStreamWindowSize is used to control the maximum
 	// window size that we allow for a stream.
 	MaxStreamWindowSize uint32
@@ -34,30 +31,50 @@ type Config struct {
 // DefaultConfig is used to return a default configuration
 func DefaultConfig() *Config {
 	return &Config{
-		AcceptBacklog:        256,
-		EnableCompression:    true,
-		EnableKeepAlive:      true,
-		KeepAliveInterval:    30 * time.Second,
-		MaxSessionWindowSize: initialSessionWindow,
-		MaxStreamWindowSize:  initialStreamWindow,
+		AcceptBacklog:       256,
+		EnableCompression:   true,
+		EnableKeepAlive:     true,
+		KeepAliveInterval:   30 * time.Second,
+		MaxStreamWindowSize: initialStreamWindow,
 	}
+}
+
+// VerifyConfig is used to verify the sanity of configuration
+func VerifyConfig(config *Config) error {
+	if config.AcceptBacklog <= 0 {
+		return fmt.Errorf("backlog must be positive")
+	}
+	if config.KeepAliveInterval == 0 {
+		return fmt.Errorf("keep-alive interval must be positive")
+	}
+	if config.MaxStreamWindowSize < initialStreamWindow {
+		return fmt.Errorf("MaxStreamWindowSize must be larger than %d", initialStreamWindow)
+	}
+	return nil
 }
 
 // Server is used to initialize a new server-side connection.
 // There must be at most one server-side connection. If a nil config is
 // provided, the DefaultConfiguration will be used.
-func Server(conn io.ReadWriteCloser, config *Config) *Session {
+func Server(conn io.ReadWriteCloser, config *Config) (*Session, error) {
 	if config == nil {
 		config = DefaultConfig()
 	}
-	return newSession(config, conn, false)
+	if err := VerifyConfig(config); err != nil {
+		return nil, err
+	}
+	return newSession(config, conn, false), nil
 }
 
 // Client is used to initialize a new client-side connection.
 // There must be at most one client-side connection.
-func Client(conn io.ReadWriteCloser, config *Config) *Session {
+func Client(conn io.ReadWriteCloser, config *Config) (*Session, error) {
 	if config == nil {
 		config = DefaultConfig()
 	}
-	return newSession(config, conn, true)
+
+	if err := VerifyConfig(config); err != nil {
+		return nil, err
+	}
+	return newSession(config, conn, true), nil
 }

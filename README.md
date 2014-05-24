@@ -115,8 +115,8 @@ hard close a stream immediately.
 
 ## Flow Control
 
-When Yamux is initially started there is a 2MB window size for
-the session. Additionally, each new stream has a 256KB window size.
+When Yamux is initially starts each stream with a 256KB window size.
+There is no window size for the session.
 
 To prevent the session or streams from stalling, window update
 frames should be sent regularly. Yamux can be configured to provide

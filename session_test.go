@@ -31,12 +31,16 @@ func testConn() (io.ReadWriteCloser, io.ReadWriteCloser) {
 	return &pipeConn{read1, write2}, &pipeConn{read2, write1}
 }
 
-func TestPing(t *testing.T) {
+func testClientServer() (*Session, *Session) {
 	conn1, conn2 := testConn()
-	client := Client(conn1, nil)
-	defer client.Close()
+	client, _ := Client(conn1, nil)
+	server, _ := Server(conn2, nil)
+	return client, server
+}
 
-	server := Server(conn2, nil)
+func TestPing(t *testing.T) {
+	client, server := testClientServer()
+	defer client.Close()
 	defer server.Close()
 
 	rtt, err := client.Ping()
@@ -57,11 +61,8 @@ func TestPing(t *testing.T) {
 }
 
 func TestAccept(t *testing.T) {
-	conn1, conn2 := testConn()
-	client := Client(conn1, nil)
+	client, server := testClientServer()
 	defer client.Close()
-
-	server := Server(conn2, nil)
 	defer server.Close()
 
 	wg := &sync.WaitGroup{}
@@ -137,11 +138,8 @@ func TestAccept(t *testing.T) {
 }
 
 func TestSendData_Small(t *testing.T) {
-	conn1, conn2 := testConn()
-	client := Client(conn1, nil)
+	client, server := testClientServer()
 	defer client.Close()
-
-	server := Server(conn2, nil)
 	defer server.Close()
 
 	wg := &sync.WaitGroup{}
@@ -208,11 +206,8 @@ func TestSendData_Small(t *testing.T) {
 }
 
 func TestSendData_Large(t *testing.T) {
-	conn1, conn2 := testConn()
-	client := Client(conn1, nil)
+	client, server := testClientServer()
 	defer client.Close()
-
-	server := Server(conn2, nil)
 	defer server.Close()
 
 	data := make([]byte, 512*1024)

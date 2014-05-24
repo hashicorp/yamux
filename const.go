@@ -93,9 +93,6 @@ const (
 )
 
 const (
-	// initialSessionWindow is the initial session window size
-	initialSessionWindow uint32 = 2 * 1024 * 1024
-
 	// initialStreamWindow is the initial stream window size
 	initialStreamWindow uint32 = 256 * 1024
 )

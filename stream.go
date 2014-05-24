@@ -48,10 +48,10 @@ func newStream(session *Session, id uint32, state streamState) *Stream {
 		id:         id,
 		session:    session,
 		state:      state,
+		sendHdr:    header(make([]byte, headerSize)),
 		recvWindow: initialStreamWindow,
 		sendWindow: initialStreamWindow,
 		notifyCh:   make(chan struct{}, 1),
-		sendHdr:    header(make([]byte, headerSize)),
 	}
 	return s
 }
