@@ -236,9 +236,14 @@ func (s *Session) keepalive() {
 	}
 }
 
-// waitForSend waits to send a header, checking for a potential shutdown
+// waitForSendErr waits to send a header, checking for a potential shutdown
 func (s *Session) waitForSend(hdr header, body io.Reader) error {
 	errCh := make(chan error, 1)
+	return s.waitForSendErr(hdr, body, errCh)
+}
+
+// waitForSendErr waits to send a header, checking for a potential shutdown
+func (s *Session) waitForSendErr(hdr header, body io.Reader, errCh chan error) error {
 	ready := sendReady{Hdr: hdr, Body: body, Err: errCh}
 	select {
 	case s.sendCh <- ready:

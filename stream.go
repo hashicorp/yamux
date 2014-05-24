@@ -37,9 +37,11 @@ type Stream struct {
 	recvLock      sync.Mutex
 
 	controlHdr     header
+	controlErr     chan error
 	controlHdrLock sync.Mutex
 
 	sendHdr  header
+	sendErr  chan error
 	sendLock sync.Mutex
 
 	recvNotifyCh chan struct{}
@@ -62,7 +64,9 @@ func newStream(session *Session, id uint32, state streamState) *Stream {
 		session:      session,
 		state:        state,
 		controlHdr:   header(make([]byte, headerSize)),
+		controlErr:   make(chan error, 1),
 		sendHdr:      header(make([]byte, headerSize)),
+		sendErr:      make(chan error, 1),
 		recvWindow:   initialStreamWindow,
 		sendWindow:   initialStreamWindow,
 		recvNotifyCh: make(chan struct{}, 1),
@@ -185,7 +189,7 @@ START:
 
 	// Send the header
 	s.sendHdr.encode(typeData, flags, s.id, max)
-	if err := s.session.waitForSend(s.sendHdr, body); err != nil {
+	if err := s.session.waitForSendErr(s.sendHdr, body, s.sendErr); err != nil {
 		return 0, err
 	}
 
@@ -247,7 +251,7 @@ func (s *Stream) sendWindowUpdate() error {
 
 	// Send the header
 	s.controlHdr.encode(typeWindowUpdate, flags, s.id, delta)
-	if err := s.session.waitForSend(s.controlHdr, nil); err != nil {
+	if err := s.session.waitForSendErr(s.controlHdr, nil, s.controlErr); err != nil {
 		return err
 	}
 
