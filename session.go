@@ -1,6 +1,7 @@
 package yamux
 
 import (
+	"bufio"
 	"fmt"
 	"io"
 	"math"
@@ -26,6 +27,9 @@ type Session struct {
 
 	// conn is the underlying connection
 	conn io.ReadWriteCloser
+
+	// bufRead is a buffered reader
+	bufRead *bufio.Reader
 
 	// pings is used to track inflight pings
 	pings    map[uint32]chan struct{}
@@ -67,6 +71,7 @@ func newSession(config *Config, conn io.ReadWriteCloser, client bool) *Session {
 	s := &Session{
 		config:     config,
 		conn:       conn,
+		bufRead:    bufio.NewReader(conn),
 		pings:      make(map[uint32]chan struct{}),
 		streams:    make(map[uint32]*Stream),
 		acceptCh:   make(chan *Stream, config.AcceptBacklog),
@@ -299,7 +304,7 @@ func (s *Session) recv() {
 	var handler func(header) error
 	for !s.IsClosed() {
 		// Read the header
-		if _, err := io.ReadFull(s.conn, hdr); err != nil {
+		if _, err := io.ReadFull(s.bufRead, hdr); err != nil {
 			s.exitErr(err)
 			return
 		}
@@ -365,7 +370,7 @@ func (s *Session) handleStreamMessage(hdr header) error {
 	}
 
 	// Read the new data
-	if err := stream.readData(hdr, flags, s.conn); err != nil {
+	if err := stream.readData(hdr, flags, s.bufRead); err != nil {
 		s.sendNoWait(s.goAway(goAwayProtoErr))
 		return err
 	}
