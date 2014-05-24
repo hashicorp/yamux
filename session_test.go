@@ -1,6 +1,7 @@
 package yamux
 
 import (
+	"fmt"
 	"io"
 	"sync"
 	"testing"
@@ -291,4 +292,64 @@ func TestGoAway(t *testing.T) {
 	if err != ErrRemoteGoAway {
 		t.Fatalf("err: %v", err)
 	}
+}
+
+func TestManyStreams(t *testing.T) {
+	client, server := testClientServer()
+	defer client.Close()
+	defer server.Close()
+
+	wg := &sync.WaitGroup{}
+
+	acceptor := func(i int) {
+		defer wg.Done()
+		stream, err := server.AcceptStream()
+		if err != nil {
+			t.Fatalf("err: %v", err)
+		}
+		defer stream.Close()
+
+		buf := make([]byte, 512)
+		for {
+			n, err := stream.Read(buf)
+			println("read")
+			if err == io.EOF {
+				return
+			}
+			if err != nil {
+				t.Fatalf("err: %v", err)
+			}
+			if n == 0 {
+				t.Fatalf("err: %v", err)
+			}
+		}
+	}
+	sender := func(i int) {
+		defer wg.Done()
+		stream, err := client.Open()
+		if err != nil {
+			t.Fatalf("err: %v", err)
+		}
+		defer stream.Close()
+
+		msg := fmt.Sprintf("%08d", i)
+		for i := 0; i < 1000; i++ {
+			n, err := stream.Write([]byte(msg))
+			println("write")
+			if err != nil {
+				t.Fatalf("err: %v", err)
+			}
+			if n != len(msg) {
+				t.Fatalf("short write %d", n)
+			}
+		}
+	}
+
+	for i := 0; i < 50; i++ {
+		wg.Add(2)
+		go acceptor(i)
+		go sender(i)
+	}
+
+	wg.Wait()
 }
