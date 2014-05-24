@@ -487,3 +487,63 @@ func TestHalfClose(t *testing.T) {
 		t.Fatalf("bad: %v", n)
 	}
 }
+
+func TestReadDeadline(t *testing.T) {
+	client, server := testClientServer()
+	defer client.Close()
+	defer server.Close()
+
+	stream, err := client.Open()
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	defer stream.Close()
+
+	stream2, err := server.Accept()
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	defer stream2.Close()
+
+	if err := stream.SetReadDeadline(time.Now().Add(5 * time.Millisecond)); err != nil {
+		t.Fatalf("err: %v", err)
+	}
+
+	buf := make([]byte, 4)
+	if _, err := stream.Read(buf); err != ErrTimeout {
+		t.Fatalf("err: %v", err)
+	}
+}
+
+func TestWriteDeadline(t *testing.T) {
+	client, server := testClientServer()
+	defer client.Close()
+	defer server.Close()
+
+	stream, err := client.Open()
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	defer stream.Close()
+
+	stream2, err := server.Accept()
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	defer stream2.Close()
+
+	if err := stream.SetWriteDeadline(time.Now().Add(50 * time.Millisecond)); err != nil {
+		t.Fatalf("err: %v", err)
+	}
+
+	buf := make([]byte, 512)
+	for i := 0; i < int(initialStreamWindow); i++ {
+		_, err := stream.Write(buf)
+		if err != nil && err == ErrTimeout {
+			return
+		} else if err != nil {
+			t.Fatalf("err: %v", err)
+		}
+	}
+	t.Fatalf("Expected timeout")
+}
