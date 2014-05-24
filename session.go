@@ -21,9 +21,6 @@ type Session struct {
 	// accepting futher connections. Must be first for alignment.
 	localGoAway int32
 
-	// client is true if we are a client size connection
-	client bool
-
 	// config holds our configuration
 	config *Config
 
@@ -68,7 +65,6 @@ type sendReady struct {
 // newSession is used to construct a new session
 func newSession(config *Config, conn io.ReadWriteCloser, client bool) *Session {
 	s := &Session{
-		client:     client,
 		config:     config,
 		conn:       conn,
 		pings:      make(map[uint32]chan struct{}),
