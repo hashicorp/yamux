@@ -434,3 +434,56 @@ func TestManyStreams_PingPong(t *testing.T) {
 
 	wg.Wait()
 }
+
+func TestHalfClose(t *testing.T) {
+	client, server := testClientServer()
+	defer client.Close()
+	defer server.Close()
+
+	stream, err := client.Open()
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if _, err := stream.Write([]byte("a")); err != nil {
+		t.Fatalf("err: %v", err)
+	}
+
+	stream2, err := server.Accept()
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	stream2.Close() // Half close
+
+	buf := make([]byte, 4)
+	n, err := stream2.Read(buf)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("bad: %v", n)
+	}
+
+	// Send more
+	if _, err := stream.Write([]byte("bcd")); err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	stream.Close()
+
+	// Read after close
+	n, err = stream2.Read(buf)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if n != 3 {
+		t.Fatalf("bad: %v", n)
+	}
+
+	// EOF after close
+	n, err = stream2.Read(buf)
+	if err != io.EOF {
+		t.Fatalf("err: %v", err)
+	}
+	if n != 0 {
+		t.Fatalf("bad: %v", n)
+	}
+}
