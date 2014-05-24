@@ -277,3 +277,18 @@ func TestSendData_Large(t *testing.T) {
 		panic("timeout")
 	}
 }
+
+func TestGoAway(t *testing.T) {
+	client, server := testClientServer()
+	defer client.Close()
+	defer server.Close()
+
+	if err := server.GoAway(); err != nil {
+		t.Fatalf("err: %v", err)
+	}
+
+	_, err := client.Open()
+	if err != ErrRemoteGoAway {
+		t.Fatalf("err: %v", err)
+	}
+}
