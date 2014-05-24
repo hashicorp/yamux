@@ -132,12 +132,14 @@ WAIT:
 	select {
 	case <-s.recvNotifyCh:
 		if dBuf != nil && dBuf.bytes > 0 {
-			return dBuf.bytes, nil
+			err = s.sendWindowUpdate()
+			return dBuf.bytes, err
 		}
 		goto START
 	case <-timeout:
 		if dBuf != nil && dBuf.bytes > 0 {
-			return dBuf.bytes, nil
+			err = s.sendWindowUpdate()
+			return dBuf.bytes, err
 		}
 		return 0, ErrTimeout
 	}
