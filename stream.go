@@ -2,7 +2,6 @@ package yamux
 
 import (
 	"bytes"
-	"compress/lzw"
 	"io"
 	"sync"
 	"time"
@@ -149,8 +148,6 @@ START:
 	// Send up to our send window
 	max = min(s.sendWindow, uint32(len(b)))
 	body = bytes.NewReader(b[:max])
-
-	// TODO: Compress
 
 	// Send the header
 	s.sendHdr.encode(typeData, flags, s.id, max)
@@ -336,13 +333,6 @@ func (s *Stream) readData(hdr header, flags uint16, conn io.Reader) error {
 
 	// Wrap in a limited reader
 	conn = &io.LimitedReader{R: conn, N: int64(length)}
-
-	// Handle potential data compression
-	if flags&flagLZW == flagLZW {
-		cr := lzw.NewReader(conn, lzw.MSB, 8)
-		defer cr.Close()
-		conn = cr
-	}
 
 	// Copy to our buffer
 	if _, err := io.Copy(&s.recvBuf, conn); err != nil {

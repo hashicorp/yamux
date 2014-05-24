@@ -9,7 +9,6 @@ interoperable with it.
 Yamux features include:
 * Bi-directional streams created by either client or server
 * Flow control, this prevents a single flow from starving others
-* Transparent compression
 
 # Framing
 
@@ -63,9 +62,6 @@ to the message type. The following flags are supported:
   message or window update.
 
 * 0x8 RST - Reset a stream immediately. Sent with a data message only.
-
-* 0x 16 LZW - Indicates the payload is LZW compressed. Sent with a data message
-  only.
 
 ## StreamID Field
 

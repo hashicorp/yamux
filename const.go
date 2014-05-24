@@ -86,10 +86,6 @@ const (
 
 	// RST is used to hard close a given stream.
 	flagRST
-
-	// LZW is used to indicate that the payload is
-	// compressed with the LZW algorithm
-	flagLZW
 )
 
 const (

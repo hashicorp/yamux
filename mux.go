@@ -12,10 +12,6 @@ type Config struct {
 	// waiting an accept.
 	AcceptBacklog int
 
-	// EnableCompression is used to control if we compress
-	// outgoing data. We have no control over incoming data.
-	EnableCompression bool
-
 	// EnableKeepalive is used to do a period keep alive
 	// messages using a ping.
 	EnableKeepAlive bool
@@ -32,7 +28,6 @@ type Config struct {
 func DefaultConfig() *Config {
 	return &Config{
 		AcceptBacklog:       256,
-		EnableCompression:   true,
 		EnableKeepAlive:     true,
 		KeepAliveInterval:   30 * time.Second,
 		MaxStreamWindowSize: initialStreamWindow,

@@ -34,9 +34,6 @@ func TestConst(t *testing.T) {
 	if flagRST != 8 {
 		t.Fatalf("bad: %v", flagRST)
 	}
-	if flagLZW != 16 {
-		t.Fatalf("bad: %v", flagLZW)
-	}
 
 	if goAwayNormal != 0 {
 		t.Fatalf("bad: %v", goAwayNormal)
@@ -55,7 +52,7 @@ func TestConst(t *testing.T) {
 
 func TestEncodeDecode(t *testing.T) {
 	hdr := header(make([]byte, headerSize))
-	hdr.encode(typeWindowUpdate, flagACK|flagLZW, 1234, 4321)
+	hdr.encode(typeWindowUpdate, flagACK|flagRST, 1234, 4321)
 
 	if hdr.Version() != protoVersion {
 		t.Fatalf("bad: %v", hdr)
@@ -63,7 +60,7 @@ func TestEncodeDecode(t *testing.T) {
 	if hdr.MsgType() != typeWindowUpdate {
 		t.Fatalf("bad: %v", hdr)
 	}
-	if hdr.Flags() != flagACK|flagLZW {
+	if hdr.Flags() != flagACK|flagRST {
 		t.Fatalf("bad: %v", hdr)
 	}
 	if hdr.StreamID() != 1234 {
