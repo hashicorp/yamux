@@ -404,7 +404,7 @@ func TestManyStreams_PingPong(t *testing.T) {
 		defer stream.Close()
 
 		buf := make([]byte, 4)
-		for i := 0; i < 10000; i++ {
+		for i := 0; i < 1000; i++ {
 			n, err := stream.Write(ping)
 			if err != nil {
 				t.Fatalf("err: %v", err)
@@ -426,7 +426,7 @@ func TestManyStreams_PingPong(t *testing.T) {
 		}
 	}
 
-	for i := 0; i < 100; i++ {
+	for i := 0; i < 50; i++ {
 		wg.Add(2)
 		go acceptor(i)
 		go sender(i)
