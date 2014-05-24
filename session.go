@@ -270,7 +270,7 @@ func (s *Session) sendNoWait(hdr header) error {
 
 // send is a long running goroutine that sends data
 func (s *Session) send() {
-	for !s.IsClosed() {
+	for {
 		select {
 		case ready := <-s.sendCh:
 			// Send a header if ready
@@ -309,7 +309,7 @@ func (s *Session) send() {
 func (s *Session) recv() {
 	hdr := header(make([]byte, headerSize))
 	var handler func(header) error
-	for !s.IsClosed() {
+	for {
 		// Read the header
 		if _, err := io.ReadFull(s.bufRead, hdr); err != nil {
 			s.exitErr(err)
