@@ -105,12 +105,11 @@ func (s *Session) Open() (*Stream, error) {
 		return nil, ErrRemoteGoAway
 	}
 
-	s.streamLock.Lock()
-	defer s.streamLock.Unlock()
-
 	// Check if we've exhaused the streams
+	s.streamLock.Lock()
 	id := s.nextStreamID
 	if id >= math.MaxUint32-1 {
+		s.streamLock.Unlock()
 		return nil, ErrStreamsExhausted
 	}
 	s.nextStreamID += 2
@@ -118,6 +117,7 @@ func (s *Session) Open() (*Stream, error) {
 	// Register the stream
 	stream := newStream(s, id, streamInit)
 	s.streams[id] = stream
+	s.streamLock.Unlock()
 
 	// Send the window update to create
 	return stream, stream.sendWindowUpdate()
