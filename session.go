@@ -22,6 +22,10 @@ type Session struct {
 	// accepting futher connections. Must be first for alignment.
 	localGoAway int32
 
+	// nextStreamID is the next stream we should
+	// send. This depends if we are a client/server.
+	nextStreamID uint32
+
 	// config holds our configuration
 	config *Config
 
@@ -35,10 +39,6 @@ type Session struct {
 	pings    map[uint32]chan struct{}
 	pingID   uint32
 	pingLock sync.Mutex
-
-	// nextStreamID is the next stream we should
-	// send. This depends if we are a client/server.
-	nextStreamID uint32
 
 	// streams maps a stream id to a stream
 	streams    map[uint32]*Stream
@@ -110,17 +110,19 @@ func (s *Session) Open() (*Stream, error) {
 		return nil, ErrRemoteGoAway
 	}
 
-	// Check if we've exhaused the streams
-	s.streamLock.Lock()
-	id := s.nextStreamID
+GET_ID:
+	// Get and ID, and check for stream exhaustion
+	id := atomic.LoadUint32(&s.nextStreamID)
 	if id >= math.MaxUint32-1 {
-		s.streamLock.Unlock()
 		return nil, ErrStreamsExhausted
 	}
-	s.nextStreamID += 2
+	if !atomic.CompareAndSwapUint32(&s.nextStreamID, id, id+2) {
+		goto GET_ID
+	}
 
 	// Register the stream
 	stream := newStream(s, id, streamInit)
+	s.streamLock.Lock()
 	s.streams[id] = stream
 	s.streamLock.Unlock()
 
