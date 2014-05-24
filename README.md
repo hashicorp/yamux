@@ -72,9 +72,6 @@ the session.
 
 Both Ping and Go Away messages should always use the 0 StreamID.
 
-A Window Update may also provide StreamID 0, meaning the window for
-the entire session is being modified.
-
 ## Length Field
 
 The meaning of the length field depends on the message type:
