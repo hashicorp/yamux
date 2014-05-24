@@ -396,7 +396,7 @@ func (s *Stream) readData(hdr header, flags uint16, conn io.Reader) error {
 	}
 
 	// Copy to our buffer anything left
-	if n, err := io.Copy(&s.recvBuf, conn); err != nil {
+	if _, err := io.Copy(&s.recvBuf, conn); err != nil {
 		s.recvLock.Unlock()
 		return err
 	}
