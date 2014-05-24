@@ -430,8 +430,11 @@ func (s *Session) incomingStream(id uint32) error {
 	if atomic.LoadInt32(&s.localGoAway) == 1 {
 		hdr := header(make([]byte, headerSize))
 		hdr.encode(typeWindowUpdate, flagRST, id, 0)
-		return s.waitForSend(hdr, nil)
+		return s.sendNoWait(hdr)
 	}
+
+	// Allocate a new stream
+	stream := newStream(s, id, streamSYNReceived)
 
 	s.streamLock.Lock()
 	defer s.streamLock.Unlock()
@@ -443,7 +446,6 @@ func (s *Session) incomingStream(id uint32) error {
 	}
 
 	// Register the stream
-	stream := newStream(s, id, streamSYNReceived)
 	s.streams[id] = stream
 
 	// Check if we've exceeded the backlog
@@ -454,9 +456,8 @@ func (s *Session) incomingStream(id uint32) error {
 		// Backlog exceeded! RST the stream
 		delete(s.streams, id)
 		stream.sendHdr.encode(typeWindowUpdate, flagRST, id, 0)
-		s.sendNoWait(stream.sendHdr)
+		return s.sendNoWait(stream.sendHdr)
 	}
-	return nil
 }
 
 // closeStream is used to close a stream once both sides have
