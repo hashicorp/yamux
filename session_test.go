@@ -1,6 +1,7 @@
 package yamux
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"sync"
@@ -312,7 +313,6 @@ func TestManyStreams(t *testing.T) {
 		buf := make([]byte, 512)
 		for {
 			n, err := stream.Read(buf)
-			println("read")
 			if err == io.EOF {
 				return
 			}
@@ -335,7 +335,6 @@ func TestManyStreams(t *testing.T) {
 		msg := fmt.Sprintf("%08d", i)
 		for i := 0; i < 1000; i++ {
 			n, err := stream.Write([]byte(msg))
-			println("write")
 			if err != nil {
 				t.Fatalf("err: %v", err)
 			}
@@ -346,6 +345,88 @@ func TestManyStreams(t *testing.T) {
 	}
 
 	for i := 0; i < 50; i++ {
+		wg.Add(2)
+		go acceptor(i)
+		go sender(i)
+	}
+
+	wg.Wait()
+}
+
+func TestManyStreams_PingPong(t *testing.T) {
+	client, server := testClientServer()
+	defer client.Close()
+	defer server.Close()
+
+	wg := &sync.WaitGroup{}
+
+	ping := []byte("ping")
+	pong := []byte("pong")
+
+	acceptor := func(i int) {
+		defer wg.Done()
+		stream, err := server.AcceptStream()
+		if err != nil {
+			t.Fatalf("err: %v", err)
+		}
+		defer stream.Close()
+
+		buf := make([]byte, 4)
+		for {
+			n, err := stream.Read(buf)
+			if err == io.EOF {
+				return
+			}
+			if err != nil {
+				t.Fatalf("err: %v", err)
+			}
+			if n != 4 {
+				t.Fatalf("err: %v", err)
+			}
+			if !bytes.Equal(buf, ping) {
+				t.Fatalf("bad: %s", buf)
+			}
+			n, err = stream.Write(pong)
+			if err != nil {
+				t.Fatalf("err: %v", err)
+			}
+			if n != 4 {
+				t.Fatalf("err: %v", err)
+			}
+		}
+	}
+	sender := func(i int) {
+		defer wg.Done()
+		stream, err := client.Open()
+		if err != nil {
+			t.Fatalf("err: %v", err)
+		}
+		defer stream.Close()
+
+		buf := make([]byte, 4)
+		for i := 0; i < 10000; i++ {
+			n, err := stream.Write(ping)
+			if err != nil {
+				t.Fatalf("err: %v", err)
+			}
+			if n != 4 {
+				t.Fatalf("short write %d", n)
+			}
+
+			n, err = stream.Read(buf)
+			if err != nil {
+				t.Fatalf("err: %v", err)
+			}
+			if n != 4 {
+				t.Fatalf("err: %v", err)
+			}
+			if !bytes.Equal(buf, pong) {
+				t.Fatalf("bad: %s", buf)
+			}
+		}
+	}
+
+	for i := 0; i < 100; i++ {
 		wg.Add(2)
 		go acceptor(i)
 		go sender(i)
