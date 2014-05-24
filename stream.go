@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"compress/lzw"
 	"io"
-	"log"
 	"sync"
 	"time"
 )
@@ -218,7 +217,6 @@ func (s *Stream) sendWindowUpdate() error {
 	if err := s.session.waitForSend(s.sendHdr, nil); err != nil {
 		return err
 	}
-	log.Printf("Window Update %d +%d", s.id, delta)
 
 	// Update our window
 	s.recvWindow += delta
@@ -274,29 +272,6 @@ func (s *Stream) forceClose() {
 	defer s.lock.Unlock()
 	s.state = streamClosed
 	asyncNotify(s.notifyCh)
-}
-
-// SetDeadline sets the read and write deadlines
-func (s *Stream) SetDeadline(t time.Time) error {
-	if err := s.SetReadDeadline(t); err != nil {
-		return err
-	}
-	if err := s.SetWriteDeadline(t); err != nil {
-		return err
-	}
-	return nil
-}
-
-// SetReadDeadline sets the deadline for future Read calls.
-func (s *Stream) SetReadDeadline(t time.Time) error {
-	s.readDeadline = t
-	return nil
-}
-
-// SetWriteDeadline sets the deadline for future Write calls
-func (s *Stream) SetWriteDeadline(t time.Time) error {
-	s.writeDeadline = t
-	return nil
 }
 
 // processFlags is used to update the state of the stream
@@ -376,5 +351,28 @@ func (s *Stream) readData(hdr header, flags uint16, conn io.Reader) error {
 
 	// Unblock any readers
 	asyncNotify(s.notifyCh)
+	return nil
+}
+
+// SetDeadline sets the read and write deadlines
+func (s *Stream) SetDeadline(t time.Time) error {
+	if err := s.SetReadDeadline(t); err != nil {
+		return err
+	}
+	if err := s.SetWriteDeadline(t); err != nil {
+		return err
+	}
+	return nil
+}
+
+// SetReadDeadline sets the deadline for future Read calls.
+func (s *Stream) SetReadDeadline(t time.Time) error {
+	s.readDeadline = t
+	return nil
+}
+
+// SetWriteDeadline sets the deadline for future Write calls
+func (s *Stream) SetWriteDeadline(t time.Time) error {
+	s.writeDeadline = t
 	return nil
 }
