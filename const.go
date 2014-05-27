@@ -44,6 +44,10 @@ var (
 
 	// ErrRemoteGoAway is used when we get a go away from the other side
 	ErrRemoteGoAway = fmt.Errorf("remote end is not accepting connections")
+
+	// ErrConnectionReset is sent if a stream is reset. This can happen
+	// if the backlog is exceeded, or if there was a remote GoAway.
+	ErrConnectionReset = fmt.Errorf("connection reset")
 )
 
 const (

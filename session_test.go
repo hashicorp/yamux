@@ -34,9 +34,16 @@ func testConn() (io.ReadWriteCloser, io.ReadWriteCloser) {
 }
 
 func testClientServer() (*Session, *Session) {
+	conf := DefaultConfig()
+	conf.AcceptBacklog = 64
+	conf.KeepAliveInterval = 100 * time.Millisecond
+	return testClientServerConfig(conf)
+}
+
+func testClientServerConfig(conf *Config) (*Session, *Session) {
 	conn1, conn2 := testConn()
-	client, _ := Client(conn1, nil)
-	server, _ := Server(conn2, nil)
+	client, _ := Client(conn1, conf)
+	server, _ := Server(conn2, conf)
 	return client, server
 }
 
@@ -546,4 +553,41 @@ func TestWriteDeadline(t *testing.T) {
 		}
 	}
 	t.Fatalf("Expected timeout")
+}
+
+func TestBacklogExceeded(t *testing.T) {
+	client, server := testClientServer()
+	defer client.Close()
+	defer server.Close()
+
+	// Fill the backlog
+	max := client.config.AcceptBacklog
+	for i := 0; i < max; i++ {
+		stream, err := client.Open()
+		if err != nil {
+			t.Fatalf("err: %v", err)
+		}
+		defer stream.Close()
+
+		if _, err := stream.Write([]byte("foo")); err != nil {
+			t.Fatalf("err: %v", err)
+		}
+	}
+
+	// Exceed the backlog!
+	stream, err := client.Open()
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	defer stream.Close()
+
+	if _, err := stream.Write([]byte("foo")); err != nil {
+		t.Fatalf("err: %v", err)
+	}
+
+	buf := make([]byte, 4)
+	stream.SetReadDeadline(time.Now().Add(50 * time.Millisecond))
+	if _, err := stream.Read(buf); err != ErrConnectionReset {
+		t.Fatalf("err: %v", err)
+	}
 }

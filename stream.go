@@ -18,6 +18,7 @@ const (
 	streamLocalClose
 	streamRemoteClose
 	streamClosed
+	streamReset
 )
 
 // Stream is used to represent a logical stream
@@ -100,6 +101,9 @@ START:
 			s.stateLock.Unlock()
 			return 0, io.EOF
 		}
+	case streamReset:
+		s.stateLock.Unlock()
+		return 0, ErrConnectionReset
 	}
 	s.stateLock.Unlock()
 
@@ -174,6 +178,9 @@ START:
 	case streamClosed:
 		s.stateLock.Unlock()
 		return 0, ErrStreamClosed
+	case streamReset:
+		s.stateLock.Unlock()
+		return 0, ErrConnectionReset
 	}
 	s.stateLock.Unlock()
 
@@ -296,6 +303,7 @@ func (s *Stream) Close() error {
 		goto SEND_CLOSE
 
 	case streamClosed:
+	case streamReset:
 	default:
 		panic("unhandled state")
 	}
@@ -343,7 +351,7 @@ func (s *Stream) processFlags(flags uint16) error {
 			return ErrUnexpectedFlag
 		}
 	} else if flags&flagRST == flagRST {
-		s.state = streamClosed
+		s.state = streamReset
 		s.session.closeStream(s.id, true)
 		s.notifyWaiting()
 	}

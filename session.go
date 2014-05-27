@@ -361,10 +361,9 @@ func (s *Session) handleStreamMessage(hdr header) error {
 	stream := s.streams[id]
 	s.streamLock.Unlock()
 
-	// Make sure we have a stream
+	// If we do not have a stream, likely we sent a RST
 	if stream == nil {
-		s.sendNoWait(s.goAway(goAwayProtoErr))
-		return ErrMissingStream
+		return nil
 	}
 
 	// Check if this is a window update
