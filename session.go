@@ -101,8 +101,13 @@ func (s *Session) IsClosed() bool {
 	}
 }
 
-// Open is used to create a new stream
-func (s *Session) Open() (*Stream, error) {
+// Open is used to create a new stream as a net.Conn
+func (s *Session) Open() (net.Conn, error) {
+	return s.OpenStream()
+}
+
+// OpenStream is used to create a new stream
+func (s *Session) OpenStream() (*Stream, error) {
 	if s.IsClosed() {
 		return nil, ErrSessionShutdown
 	}

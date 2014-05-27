@@ -107,7 +107,7 @@ func TestAccept(t *testing.T) {
 
 	go func() {
 		defer wg.Done()
-		stream, err := server.Open()
+		stream, err := server.OpenStream()
 		if err != nil {
 			t.Fatalf("err: %v", err)
 		}
@@ -121,7 +121,7 @@ func TestAccept(t *testing.T) {
 
 	go func() {
 		defer wg.Done()
-		stream, err := client.Open()
+		stream, err := client.OpenStream()
 		if err != nil {
 			t.Fatalf("err: %v", err)
 		}
