@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"math"
 	"net"
 	"sync"
@@ -368,6 +369,12 @@ func (s *Session) handleStreamMessage(hdr header) error {
 
 	// If we do not have a stream, likely we sent a RST
 	if stream == nil {
+		// Drain any data on the wire
+		if hdr.MsgType() == typeData && hdr.Length() > 0 {
+			if _, err := io.CopyN(ioutil.Discard, s.bufRead, int64(hdr.Length())); err != nil {
+				return nil
+			}
+		}
 		return nil
 	}
 
