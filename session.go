@@ -141,7 +141,7 @@ func (s *Session) Accept() (net.Conn, error) {
 func (s *Session) AcceptStream() (*Stream, error) {
 	select {
 	case stream := <-s.acceptCh:
-		return stream, nil
+		return stream, stream.sendWindowUpdate()
 	case <-s.shutdownCh:
 		return nil, s.shutdownErr
 	}

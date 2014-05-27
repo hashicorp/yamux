@@ -591,3 +591,50 @@ func TestBacklogExceeded(t *testing.T) {
 		t.Fatalf("err: %v", err)
 	}
 }
+
+func TestKeepAlive(t *testing.T) {
+	client, server := testClientServer()
+	defer client.Close()
+	defer server.Close()
+
+	time.Sleep(200 * time.Millisecond)
+
+	// Ping value should increase
+	if client.pingID == 0 {
+		t.Fatalf("should ping")
+	}
+	if server.pingID == 0 {
+		t.Fatalf("should ping")
+	}
+}
+
+func TestLargeWindow(t *testing.T) {
+	conf := DefaultConfig()
+	conf.MaxStreamWindowSize *= 2
+
+	client, server := testClientServerConfig(conf)
+	defer client.Close()
+	defer server.Close()
+
+	stream, err := client.Open()
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	defer stream.Close()
+
+	stream2, err := server.Accept()
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	defer stream2.Close()
+
+	stream.SetWriteDeadline(time.Now().Add(10 * time.Millisecond))
+	buf := make([]byte, conf.MaxStreamWindowSize)
+	n, err := stream.Write(buf)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if n != len(buf) {
+		t.Fatalf("short write: %d", n)
+	}
+}
