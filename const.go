@@ -26,10 +26,6 @@ var (
 	// opened inbound
 	ErrDuplicateStream = fmt.Errorf("duplicate stream initiated")
 
-	// ErrMissingStream indicates a stream was named which
-	// does not exist.
-	ErrMissingStream = fmt.Errorf("missing stream references")
-
 	// ErrReceiveWindowExceeded indicates the window was exceeded
 	ErrRecvWindowExceeded = fmt.Errorf("recv window exceeded")
 
