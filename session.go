@@ -391,6 +391,8 @@ func (s *Session) handleStreamMessage(hdr header) error {
 				s.logger.Printf("[ERR] yamux: Failed to discard data: %v", err)
 				return nil
 			}
+		} else {
+			s.logger.Printf("[WARN] yamux: frame for missing stream: %v", hdr)
 		}
 		return nil
 	}
