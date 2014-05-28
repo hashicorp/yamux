@@ -8,6 +8,7 @@ import (
 	"log"
 	"math"
 	"net"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -329,7 +330,7 @@ func (s *Session) recv() {
 	for {
 		// Read the header
 		if _, err := io.ReadFull(s.bufRead, hdr); err != nil {
-			if err != io.EOF {
+			if err != io.EOF && !strings.Contains(err.Error(), "closed") {
 				s.logger.Printf("[ERR] yamux: Failed to read header: %v", err)
 			}
 			s.exitErr(err)
