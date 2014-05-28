@@ -185,7 +185,11 @@ func (s *Session) Close() error {
 // exitErr is used to handle an error that is causing the
 // session to terminate.
 func (s *Session) exitErr(err error) {
-	s.shutdownErr = err
+	s.shutdownLock.Lock()
+	if s.shutdownErr == nil {
+		s.shutdownErr = err
+	}
+	s.shutdownLock.Unlock()
 	s.Close()
 }
 

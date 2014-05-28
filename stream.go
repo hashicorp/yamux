@@ -185,7 +185,8 @@ START:
 	s.stateLock.Unlock()
 
 	// If there is no data available, block
-	if atomic.LoadUint32(&s.sendWindow) == 0 {
+	window := atomic.LoadUint32(&s.sendWindow)
+	if window == 0 {
 		goto WAIT
 	}
 
@@ -193,7 +194,7 @@ START:
 	flags = s.sendFlags()
 
 	// Send up to our send window
-	max = min(s.sendWindow, uint32(len(b)))
+	max = min(window, uint32(len(b)))
 	body = bytes.NewReader(b[:max])
 
 	// Send the header
@@ -248,7 +249,7 @@ func (s *Stream) sendWindowUpdate() error {
 
 	// Determine the delta update
 	max := s.session.config.MaxStreamWindowSize
-	delta := max - s.recvWindow
+	delta := max - atomic.LoadUint32(&s.recvWindow)
 
 	// Determine the flags if any
 	flags := s.sendFlags()
@@ -265,7 +266,7 @@ func (s *Stream) sendWindowUpdate() error {
 	}
 
 	// Update our window
-	s.recvWindow += delta
+	atomic.AddUint32(&s.recvWindow, delta)
 	return nil
 }
 

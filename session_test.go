@@ -600,9 +600,14 @@ func TestKeepAlive(t *testing.T) {
 	time.Sleep(200 * time.Millisecond)
 
 	// Ping value should increase
+	client.pingLock.Lock()
+	defer client.pingLock.Unlock()
 	if client.pingID == 0 {
 		t.Fatalf("should ping")
 	}
+
+	server.pingLock.Lock()
+	defer server.pingLock.Unlock()
 	if server.pingID == 0 {
 		t.Fatalf("should ping")
 	}
