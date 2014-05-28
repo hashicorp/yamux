@@ -3,6 +3,7 @@ package yamux
 import (
 	"fmt"
 	"io"
+	"os"
 	"time"
 )
 
@@ -22,6 +23,9 @@ type Config struct {
 	// MaxStreamWindowSize is used to control the maximum
 	// window size that we allow for a stream.
 	MaxStreamWindowSize uint32
+
+	// LogOutput is used to control the log destination
+	LogOutput io.Writer
 }
 
 // DefaultConfig is used to return a default configuration
@@ -31,6 +35,7 @@ func DefaultConfig() *Config {
 		EnableKeepAlive:     true,
 		KeepAliveInterval:   30 * time.Second,
 		MaxStreamWindowSize: initialStreamWindow,
+		LogOutput:           os.Stderr,
 	}
 }
 

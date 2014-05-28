@@ -348,6 +348,7 @@ func (s *Stream) processFlags(flags uint16) error {
 			s.session.closeStream(s.id, true)
 			s.notifyWaiting()
 		default:
+			s.session.logger.Printf("[ERR] yamux: unexpected FIN flag in state %d", s.state)
 			return ErrUnexpectedFlag
 		}
 	} else if flags&flagRST == flagRST {
@@ -388,6 +389,7 @@ func (s *Stream) readData(hdr header, flags uint16, conn io.Reader) error {
 		return nil
 	}
 	if length > atomic.LoadUint32(&s.recvWindow) {
+		s.session.logger.Printf("[ERR] yamux: receive window exceeded")
 		return ErrRecvWindowExceeded
 	}
 
@@ -411,6 +413,7 @@ func (s *Stream) readData(hdr header, flags uint16, conn io.Reader) error {
 
 	// Copy to our buffer anything left
 	if _, err := io.Copy(&s.recvBuf, conn); err != nil {
+		s.session.logger.Printf("[ERR] yamux: Failed to read stream data: %v", err)
 		s.recvLock.Unlock()
 		return err
 	}
