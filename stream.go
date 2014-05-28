@@ -278,7 +278,7 @@ func (s *Stream) sendClose() error {
 	flags := s.sendFlags()
 	flags |= flagFIN
 	s.controlHdr.encode(typeWindowUpdate, flags, s.id, 0)
-	if err := s.session.sendNoWait(s.controlHdr); err != nil {
+	if err := s.session.waitForSendErr(s.controlHdr, nil, s.controlErr); err != nil {
 		return err
 	}
 	return nil
