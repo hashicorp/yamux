@@ -386,6 +386,7 @@ func (s *Session) handleStreamMessage(hdr header) error {
 	if stream == nil {
 		// Drain any data on the wire
 		if hdr.MsgType() == typeData && hdr.Length() > 0 {
+			s.logger.Printf("[WARN] yamux: Discarding data for stream: %d", id)
 			if _, err := io.CopyN(ioutil.Discard, s.bufRead, int64(hdr.Length())); err != nil {
 				s.logger.Printf("[ERR] yamux: Failed to discard data: %v", err)
 				return nil
@@ -494,10 +495,8 @@ func (s *Session) incomingStream(id uint32) error {
 
 // closeStream is used to close a stream once both sides have
 // issued a close.
-func (s *Session) closeStream(id uint32, withLock bool) {
-	if !withLock {
-		s.streamLock.Lock()
-		defer s.streamLock.Unlock()
-	}
+func (s *Session) closeStream(id uint32) {
+	s.streamLock.Lock()
 	delete(s.streams, id)
+	s.streamLock.Unlock()
 }

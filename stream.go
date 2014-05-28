@@ -300,7 +300,7 @@ func (s *Stream) Close() error {
 	case streamLocalClose:
 	case streamRemoteClose:
 		s.state = streamClosed
-		s.session.closeStream(s.id, false)
+		s.session.closeStream(s.id)
 		goto SEND_CLOSE
 
 	case streamClosed:
@@ -346,7 +346,7 @@ func (s *Stream) processFlags(flags uint16) error {
 			s.notifyWaiting()
 		case streamLocalClose:
 			s.state = streamClosed
-			s.session.closeStream(s.id, true)
+			s.session.closeStream(s.id)
 			s.notifyWaiting()
 		default:
 			s.session.logger.Printf("[ERR] yamux: unexpected FIN flag in state %d", s.state)
@@ -354,7 +354,7 @@ func (s *Stream) processFlags(flags uint16) error {
 		}
 	} else if flags&flagRST == flagRST {
 		s.state = streamReset
-		s.session.closeStream(s.id, true)
+		s.session.closeStream(s.id)
 		s.notifyWaiting()
 	}
 	return nil
