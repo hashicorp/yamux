@@ -1,130 +1,86 @@
 # Yamux
 
-Yamux or Yet another Mux (Multiplexer) is another multiplexing
-library. It relies on an underlying connection to provide reliability
+Yamux or Yet another (Multiplexer is a multiplexing library for Golang.
+It relies on an underlying connection to provide reliability
 and ordering (such as TCP or Unix domain sockets), and provides
 stream-oriented multiplexing. It is inspired by SPDY but is not
 interoperable with it.
 
 Yamux features include:
-* Bi-directional streams created by either client or server
-* Flow control, this prevents a single flow from starving others
 
-# Framing
+* Bi-directional streams
+  * Streams can be opened by either client or server
+  * Useful for NAT traversal
+  * Server-side push support
+* Flow control
+  * Prevents a flow from starving others
+  * Back-pressure to prevent overwhelming a receiver
+* Keep Alives
+  * Enables persistent connections over a load balancer
+* Efficient
+  * Yamux enables thousands of logical streams with low overhead
 
-Yamux uses a streaming connection underneath, but imposes a message
-framing so that it can be shared between many logical streams. Each
-frame contains a header like:
+## Documentation
 
-* Version (8 bits)
-* Type (8 bits)
-* Flags (16 bits)
-* StreamID (32 bits)
-* Length (32 bits)
+For complete documentation, see the associated [Godoc](http://godoc.org/github.com/hashicorp/yamux).
 
-This means that each header has a 12 byte overhead.
-All fields are encoded in network order (big endian).
-Each field is described below:
+## Specification
 
-## Version Field
+The full specification for Yamux is provided in the `spec.md` file.
+It can be used as a guide to implementors of interoperable libraries.
 
-The version field is used for future backwards compatibily. At the
-current time, the field is always set to 0, to indicate the initial
-version.
+## Usage
 
-## Type Field
+Using Yamux is remarkably simple:
 
-The type field is used to switch the frame message type. The following
-message types are supported:
-* 0x0 Data - Used to transmit data. May transmit zero length payloads
-  depending on the flags.
+```go
 
-* 0x1 Window Update - Used to updated the senders receive window size.
-  This is used to implement per-session flow control.
+func client() {
+    // Get a TCP connection
+    conn, err := net.Dial(...)
+    if err != nil {
+        panic(err)
+    }
 
-* 0x2 Ping - Used to measure RTT. It can also be used to heart-beat
-  and do keep-alives over TCP.
+    // Setup client side of yamux
+    session, err := yamux.Client(conn, nil)
+    if err != nil {
+        panic(err)
+    }
 
-* 0x3 Go Away - Used to close a session.
+    // Open a new stream
+    stream, err := session.Open()
+    if err != nil {
+        panic(err)
+    }
 
-## Flag Field
+    // Stream implements net.Conn
+    stream.Write([]byte("ping"))
+}
 
-The flags field is used to provide additional information related
-to the message type. The following flags are supported:
+func server() {
+    // Accept a TCP connection
+    conn, err := listener.Accept()
+    if err != nil {
+        panic(err)
+    }
 
-* 0x1 SYN - Signals the start of a new stream. May be sent with a data or
-  window update message. Also sent with a ping to indicate outbound.
+    // Setup server side of yamux
+    session, err := yamux.Server(conn, nil)
+    if err != nil {
+        panic(err)
+    }
 
-* 0x2 ACK - Acknowledges the start of a new stream. May be sent with a data
-  or window update message. Also sent with a ping to indicate response.
+    // Accept a stream
+    stream, err := session.Accept()
+    if err != nil {
+        panic(err)
+    }
 
-* 0x4 FIN - Performs a half-close of a new stream. May be sent with a data
-  message or window update.
+    // Listen for a message
+    buf := make([]byte, 4)
+    stream.Read(buf)
+}
 
-* 0x8 RST - Reset a stream immediately. Sent with a data message only.
-
-## StreamID Field
-
-The StreamID field is used to identify the logical stream the frame
-is addressing. The client side should use odd ID's, and the server even.
-This prevents any collisions. Additionally, the 0 ID is reserved to represent
-the session.
-
-Both Ping and Go Away messages should always use the 0 StreamID.
-
-## Length Field
-
-The meaning of the length field depends on the message type:
-* Data - provides the length of bytes following the header
-* Window update - provides a delta update to the window size
-* Ping - Contains an opaque value, echoed back
-* Go Away - Contains an error code
-
-# Message Flow
-
-There is no explicit connection setup, as Yamux relies on an underlying
-transport to be provided. However, there is a distinction between client
-and server side of the connection.
-
-## Opening a stream
-
-To open a stream, an initial data or window update frame is sent
-with a new StreamID. The SYN flag should be set to signal a new stream.
-
-The receiver must then reply with either a data or window update frame
-with the StreamID along with the ACK flag to accept the stream or with
-the RST flag to reject the stream.
-
-## Closing a stream
-
-To close a stream, either side sends a data or window update frame
-along with the FIN flag. This does a half-close indicating the sender
-will send no further data.
-
-Once both sides have closed the connection, the stream is closed.
-
-Alternatively, if an error occurs, the RST flag can be used to
-hard close a stream immediately.
-
-## Flow Control
-
-When Yamux is initially starts each stream with a 256KB window size.
-There is no window size for the session.
-
-To prevent the session or streams from stalling, window update
-frames should be sent regularly. Yamux can be configured to provide
-a limit for windows sizes.
-
-Both sides should track the number of bytes sent in Data frames
-only, as only they are tracked as part of the window size.
-
-## Session termination
-
-When a session is being terminated, the Go Away message should
-be sent. The Length should be set to one of the following to
-provide an error code:
-
-* 0x0 Normal termination
-* 0x1 Protocol error
-* 0x2 Internal error
+```
 
