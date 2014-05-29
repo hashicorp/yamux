@@ -1,8 +1,8 @@
 # Yamux
 
-Yamux or Yet another (Multiplexer is a multiplexing library for Golang.
+Yamux (Yet another Multiplexer) is a multiplexing library for Golang.
 It relies on an underlying connection to provide reliability
-and ordering (such as TCP or Unix domain sockets), and provides
+and ordering, such as TCP or Unix domain sockets, and provides
 stream-oriented multiplexing. It is inspired by SPDY but is not
 interoperable with it.
 
@@ -13,12 +13,12 @@ Yamux features include:
   * Useful for NAT traversal
   * Server-side push support
 * Flow control
-  * Prevents a flow from starving others
+  * Avoid starvation
   * Back-pressure to prevent overwhelming a receiver
 * Keep Alives
   * Enables persistent connections over a load balancer
 * Efficient
-  * Yamux enables thousands of logical streams with low overhead
+  * Enables thousands of logical streams with low overhead
 
 ## Documentation
 
