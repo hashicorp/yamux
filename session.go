@@ -8,9 +8,9 @@ import (
 	"log"
 	"math"
 	"net"
-	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 )
 
@@ -323,6 +323,29 @@ func (s *Session) send() {
 	}
 }
 
+func convertError(err error) error {
+	if err == io.EOF {
+		return err
+	}
+
+	if err == io.ErrClosedPipe {
+		return io.EOF
+	}
+
+	if op, ok := err.(*net.OpError); ok {
+		if errno, ok := op.Err.(syscall.Errno); ok {
+			switch errno {
+			case syscall.ECONNREFUSED, syscall.ECONNRESET, syscall.ENOTCONN,
+				syscall.ETIMEDOUT, syscall.EHOSTDOWN, syscall.EHOSTUNREACH,
+				syscall.ENETDOWN, syscall.ENETUNREACH, syscall.EIO, syscall.ENOENT:
+				return io.EOF
+			}
+		}
+	}
+
+	return err
+}
+
 // recv is a long running goroutine that accepts new data
 func (s *Session) recv() {
 	hdr := header(make([]byte, headerSize))
@@ -330,7 +353,7 @@ func (s *Session) recv() {
 	for {
 		// Read the header
 		if _, err := io.ReadFull(s.bufRead, hdr); err != nil {
-			if err != io.EOF && !strings.Contains(err.Error(), "closed") && !strings.Contains(err.Error(), "reset by peer") {
+			if convertError(err) != io.EOF {
 				s.logger.Printf("[ERR] yamux: Failed to read header: %v", err)
 			}
 			s.exitErr(err)
