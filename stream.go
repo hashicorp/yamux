@@ -238,14 +238,14 @@ func (s *Stream) sendWindowUpdate() error {
 		return nil
 	}
 
+	// Update our window
+	atomic.AddUint32(&s.recvWindow, delta)
+
 	// Send the header
 	s.controlHdr.encode(typeWindowUpdate, flags, s.id, delta)
 	if err := s.session.waitForSendErr(s.controlHdr, nil, s.controlErr); err != nil {
 		return err
 	}
-
-	// Update our window
-	atomic.AddUint32(&s.recvWindow, delta)
 	return nil
 }
 
@@ -368,8 +368,8 @@ func (s *Stream) readData(hdr header, flags uint16, conn io.Reader) error {
 	if length == 0 {
 		return nil
 	}
-	if length > atomic.LoadUint32(&s.recvWindow) {
-		s.session.logger.Printf("[ERR] yamux: receive window exceeded")
+	if remain := atomic.LoadUint32(&s.recvWindow); length > remain {
+		s.session.logger.Printf("[ERR] yamux: receive window exceeded (stream: %d, remain: %d, recv: %d)", s.id, remain, length)
 		return ErrRecvWindowExceeded
 	}
 
