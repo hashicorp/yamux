@@ -108,6 +108,14 @@ func (s *Session) IsClosed() bool {
 	}
 }
 
+// NumStreams returns the number of currently open streams
+func (s *Session) NumStreams() int {
+	s.streamLock.Lock()
+	num := len(s.streams)
+	s.streamLock.Unlock()
+	return num
+}
+
 // Open is used to create a new stream as a net.Conn
 func (s *Session) Open() (net.Conn, error) {
 	return s.OpenStream()
