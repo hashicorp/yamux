@@ -327,8 +327,9 @@ func (s *Stream) processFlags(flags uint16) error {
 		if s.state == streamSYNSent {
 			s.state = streamEstablished
 		}
-
-	} else if flags&flagFIN == flagFIN {
+		s.session.establishStream()
+	}
+	if flags&flagFIN == flagFIN {
 		switch s.state {
 		case streamSYNSent:
 			fallthrough
@@ -345,7 +346,11 @@ func (s *Stream) processFlags(flags uint16) error {
 			s.session.logger.Printf("[ERR] yamux: unexpected FIN flag in state %d", s.state)
 			return ErrUnexpectedFlag
 		}
-	} else if flags&flagRST == flagRST {
+	}
+	if flags&flagRST == flagRST {
+		if s.state == streamSYNSent {
+			s.session.establishStream()
+		}
 		s.state = streamReset
 		closeStream = true
 		s.notifyWaiting()

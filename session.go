@@ -50,6 +50,11 @@ type Session struct {
 	streams    map[uint32]*Stream
 	streamLock sync.Mutex
 
+	// synCh acts like a semaphore. It is sized to the AcceptBacklog which
+	// is assumed to be symmetric between the client and server. This allows
+	// the client to avoid exceeding the backlog and instead blocks the open.
+	synCh chan struct{}
+
 	// acceptCh is used to pass ready streams to the client
 	acceptCh chan *Stream
 
@@ -85,6 +90,7 @@ func newSession(config *Config, conn io.ReadWriteCloser, client bool) *Session {
 		bufRead:    bufio.NewReader(conn),
 		pings:      make(map[uint32]chan struct{}),
 		streams:    make(map[uint32]*Stream),
+		synCh:      make(chan struct{}, config.AcceptBacklog),
 		acceptCh:   make(chan *Stream, config.AcceptBacklog),
 		sendCh:     make(chan sendReady, 64),
 		recvDoneCh: make(chan struct{}),
@@ -135,6 +141,13 @@ func (s *Session) OpenStream() (*Stream, error) {
 		return nil, ErrRemoteGoAway
 	}
 
+	// Block if we have too many inflight SYNs
+	select {
+	case s.synCh <- struct{}{}:
+	case <-s.shutdownCh:
+		return nil, ErrSessionShutdown
+	}
+
 GET_ID:
 	// Get and ID, and check for stream exhaustion
 	id := atomic.LoadUint32(&s.nextStreamID)
@@ -152,7 +165,10 @@ GET_ID:
 	s.streamLock.Unlock()
 
 	// Send the window update to create
-	return stream, stream.sendWindowUpdate()
+	if err := stream.sendWindowUpdate(); err != nil {
+		return nil, err
+	}
+	return stream, nil
 }
 
 // Accept is used to block until the next available stream
@@ -166,7 +182,10 @@ func (s *Session) Accept() (net.Conn, error) {
 func (s *Session) AcceptStream() (*Stream, error) {
 	select {
 	case stream := <-s.acceptCh:
-		return stream, stream.sendWindowUpdate()
+		if err := stream.sendWindowUpdate(); err != nil {
+			return nil, err
+		}
+		return stream, nil
 	case <-s.shutdownCh:
 		return nil, s.shutdownErr
 	}
@@ -520,4 +539,14 @@ func (s *Session) closeStream(id uint32) {
 	s.streamLock.Lock()
 	delete(s.streams, id)
 	s.streamLock.Unlock()
+}
+
+// establishStream is used to mark a stream that was in the
+// SYN Sent state as established.
+func (s *Session) establishStream() {
+	select {
+	case <-s.synCh:
+	default:
+		panic("established stream without inflight syn")
+	}
 }
