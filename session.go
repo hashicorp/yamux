@@ -129,7 +129,11 @@ func (s *Session) NumStreams() int {
 
 // Open is used to create a new stream as a net.Conn
 func (s *Session) Open() (net.Conn, error) {
-	return s.OpenStream()
+	conn, err := s.OpenStream()
+	if err != nil {
+		return nil, err
+	}
+	return conn, nil
 }
 
 // OpenStream is used to create a new stream
@@ -174,7 +178,11 @@ GET_ID:
 // Accept is used to block until the next available stream
 // is ready to be accepted.
 func (s *Session) Accept() (net.Conn, error) {
-	return s.AcceptStream()
+	conn, err := s.AcceptStream()
+	if err != nil {
+		return nil, err
+	}
+	return conn, err
 }
 
 // AcceptStream is used to block until the next available stream
