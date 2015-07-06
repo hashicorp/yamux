@@ -155,6 +155,21 @@ func TestAccept(t *testing.T) {
 	}
 }
 
+func TestNonNilInterface(t *testing.T) {
+	_, server := testClientServer()
+	server.Close()
+
+	conn, err := server.Accept()
+	if err != nil && conn != nil {
+		t.Error("bad: accept should return a connection of nil value")
+	}
+
+	conn, err = server.Open()
+	if err != nil && conn != nil {
+		t.Error("bad: open should return a connection of nil value")
+	}
+}
+
 func TestSendData_Small(t *testing.T) {
 	client, server := testClientServer()
 	defer client.Close()
