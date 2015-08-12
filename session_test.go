@@ -811,7 +811,7 @@ func TestWindowUpdateWriteDuringRead(t *testing.T) {
 	defer client.Close()
 	defer server.Close()
 
-	wg := &sync.WaitGroup{}
+	var wg sync.WaitGroup
 	wg.Add(2)
 
 	// Choose a huge flood size that we know will result in a window update.
