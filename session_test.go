@@ -806,7 +806,7 @@ func TestBacklogExceeded_Accept(t *testing.T) {
 	}
 }
 
-func TestWindowUpdateWriteDuringRead(t *testing.T) {
+func TestSession_WindowUpdateWriteDuringRead(t *testing.T) {
 	client, server := testClientServer()
 	defer client.Close()
 	defer server.Close()
@@ -903,6 +903,77 @@ func TestSession_sendNoWait_Timeout(t *testing.T) {
 			} else {
 				t.Fatalf("err: %v", err)
 			}
+		}
+	}()
+
+	wg.Wait()
+}
+
+func TestSession_PingOfDeath(t *testing.T) {
+	client, server := testClientServer()
+	defer client.Close()
+	defer server.Close()
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+
+	var doPingOfDeath sync.Mutex
+	doPingOfDeath.Lock()
+
+	// This is used later to block outbound writes.
+	conn := server.conn.(*pipeConn)
+
+	// The server will accept a stream, block outbound writes, and then
+	// flood its send channel so that no more headers can be queued.
+	go func() {
+		defer wg.Done()
+
+		stream, err := server.AcceptStream()
+		if err != nil {
+			t.Fatalf("err: %v", err)
+		}
+		defer stream.Close()
+
+		conn.writeBlocker.Lock()
+		for {
+			hdr := header(make([]byte, headerSize))
+			hdr.encode(typePing, 0, 0, 0)
+			err = server.sendNoWait(hdr)
+			if err == nil {
+				continue
+			} else if err == ErrHeaderWriteTimeout {
+				break
+			} else {
+				t.Fatalf("err: %v", err)
+			}
+		}
+
+		doPingOfDeath.Unlock()
+	}()
+
+	// The client will open a stream and then send the server a ping once it
+	// can no longer write. This makes sure the server doesn't deadlock reads
+	// while trying to reply to the ping with no ability to write.
+	go func() {
+		defer wg.Done()
+
+		stream, err := client.OpenStream()
+		if err != nil {
+			t.Fatalf("err: %v", err)
+		}
+		defer stream.Close()
+
+		// This ping will never unblock because the ping id will never
+		// show up in a response.
+		doPingOfDeath.Lock()
+		go func() { client.Ping() }()
+
+		// Wait for a while to make sure the previous ping times out,
+		// then turn writes back on and make sure a ping works again.
+		time.Sleep(2 * server.config.HeaderWriteTimeout)
+		conn.writeBlocker.Unlock()
+		if _, err = client.Ping(); err != nil {
+			t.Fatalf("err: %v", err)
 		}
 	}()
 

@@ -464,7 +464,9 @@ func (s *Session) handleStreamMessage(hdr header) error {
 	// Check if this is a window update
 	if hdr.MsgType() == typeWindowUpdate {
 		if err := stream.incrSendWindow(hdr, flags); err != nil {
-			s.sendNoWait(s.goAway(goAwayProtoErr))
+			if sendErr := s.sendNoWait(s.goAway(goAwayProtoErr)); sendErr != nil {
+				s.logger.Printf("[WARN] yamux: failed to send go away: %v", sendErr)
+			}
 			return err
 		}
 		return nil
@@ -472,7 +474,9 @@ func (s *Session) handleStreamMessage(hdr header) error {
 
 	// Read the new data
 	if err := stream.readData(hdr, flags, s.bufRead); err != nil {
-		s.sendNoWait(s.goAway(goAwayProtoErr))
+		if sendErr := s.sendNoWait(s.goAway(goAwayProtoErr)); sendErr != nil {
+			s.logger.Printf("[WARN] yamux: failed to send go away: %v", sendErr)
+		}
 		return err
 	}
 	return nil
@@ -483,11 +487,16 @@ func (s *Session) handlePing(hdr header) error {
 	flags := hdr.Flags()
 	pingID := hdr.Length()
 
-	// Check if this is a query, respond back
+	// Check if this is a query, respond back in a separate context so we
+	// don't interfere with the receiving thread blocking for the write.
 	if flags&flagSYN == flagSYN {
-		hdr := header(make([]byte, headerSize))
-		hdr.encode(typePing, flagACK, 0, pingID)
-		return s.sendNoWait(hdr)
+		go func() {
+			hdr := header(make([]byte, headerSize))
+			hdr.encode(typePing, flagACK, 0, pingID)
+			if err := s.sendNoWait(hdr); err != nil {
+				s.logger.Printf("[WARN] yamux: failed to send ping reply: %v", err)
+			}
+		}()
 	}
 
 	// Handle a response
@@ -538,7 +547,9 @@ func (s *Session) incomingStream(id uint32) error {
 	// Check if stream already exists
 	if _, ok := s.streams[id]; ok {
 		s.logger.Printf("[ERR] yamux: duplicate stream declared")
-		s.sendNoWait(s.goAway(goAwayProtoErr))
+		if sendErr := s.sendNoWait(s.goAway(goAwayProtoErr)); sendErr != nil {
+			s.logger.Printf("[WARN] yamux: failed to send go away: %v", sendErr)
+		}
 		return ErrDuplicateStream
 	}
 
