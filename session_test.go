@@ -14,6 +14,7 @@ import (
 type pipeConn struct {
 	reader *io.PipeReader
 	writer *io.PipeWriter
+	writeBlocker sync.Mutex
 }
 
 func (p *pipeConn) Read(b []byte) (int, error) {
@@ -21,6 +22,8 @@ func (p *pipeConn) Read(b []byte) (int, error) {
 }
 
 func (p *pipeConn) Write(b []byte) (int, error) {
+	p.writeBlocker.Lock()
+	defer p.writeBlocker.Unlock()
 	return p.writer.Write(b)
 }
 
@@ -32,13 +35,16 @@ func (p *pipeConn) Close() error {
 func testConn() (io.ReadWriteCloser, io.ReadWriteCloser) {
 	read1, write1 := io.Pipe()
 	read2, write2 := io.Pipe()
-	return &pipeConn{read1, write2}, &pipeConn{read2, write1}
+	conn1 := &pipeConn{reader: read1, writer: write2}
+	conn2 := &pipeConn{reader: read2, writer: write1}
+	return conn1, conn2
 }
 
 func testClientServer() (*Session, *Session) {
 	conf := DefaultConfig()
 	conf.AcceptBacklog = 64
 	conf.KeepAliveInterval = 100 * time.Millisecond
+	conf.HeaderWriteTimeout = 100 * time.Millisecond
 	return testClientServerConfig(conf)
 }
 
@@ -799,3 +805,58 @@ func TestBacklogExceeded_Accept(t *testing.T) {
 		}
 	}
 }
+
+func TestWindowUpdateWriteDuringRead(t *testing.T) {
+	client, server := testClientServer()
+	defer client.Close()
+	defer server.Close()
+
+	wg := &sync.WaitGroup{}
+	wg.Add(2)
+
+	// Choose a huge flood size that we know will result in a window update.
+	flood := int64(client.config.MaxStreamWindowSize) - 1
+
+	// The server will accept a new stream and then flood data to it.
+	go func() {
+		defer wg.Done()
+
+		stream, err := server.AcceptStream()
+		if err != nil {
+			t.Fatalf("err: %v", err)
+		}
+		defer stream.Close()
+
+		n, err := stream.Write(make([]byte, flood))
+		if err != nil {
+			t.Fatalf("err: %v", err)
+		}
+		if int64(n) != flood {
+			t.Fatalf("short write: %d", n)
+		}
+	}()
+
+	// The client will open a stream, block outbound writes, and then
+	// listen to the flood from the server, which should time out since
+	// it won't be able to send the window update.
+	go func() {
+		defer wg.Done()
+
+		stream, err := client.OpenStream()
+		if err != nil {
+			t.Fatalf("err: %v", err)
+		}
+		defer stream.Close()
+
+		conn := client.conn.(*pipeConn)
+		conn.writeBlocker.Lock()
+
+		_, err = stream.Read(make([]byte, flood))
+		if err != ErrHeaderWriteTimeout {
+			t.Fatalf("err: %v", err)
+		}
+	}()
+
+	wg.Wait()
+}
+

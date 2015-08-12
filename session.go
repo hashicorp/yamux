@@ -299,19 +299,31 @@ func (s *Session) waitForSend(hdr header, body io.Reader) error {
 	return s.waitForSendErr(hdr, body, errCh)
 }
 
-// waitForSendErr waits to send a header, checking for a potential shutdown
+// waitForSendErr waits to send a header with optional data, checking for a
+// potential shutdown. If the body is not supplied then we will enforce the
+// configured HeaderWriteTimeout, since this is a small control header.
 func (s *Session) waitForSendErr(hdr header, body io.Reader, errCh chan error) error {
+	var timeout <- chan time.Time
+	if body == nil {
+		timeout = time.After(s.config.HeaderWriteTimeout)
+	}
+
 	ready := sendReady{Hdr: hdr, Body: body, Err: errCh}
 	select {
 	case s.sendCh <- ready:
 	case <-s.shutdownCh:
 		return ErrSessionShutdown
+	case <-timeout:
+		return ErrHeaderWriteTimeout
 	}
+
 	select {
 	case err := <-errCh:
 		return err
 	case <-s.shutdownCh:
 		return ErrSessionShutdown
+	case <-timeout:
+		return ErrHeaderWriteTimeout
 	}
 }
 

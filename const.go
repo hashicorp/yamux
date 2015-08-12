@@ -29,6 +29,10 @@ var (
 	// ErrReceiveWindowExceeded indicates the window was exceeded
 	ErrRecvWindowExceeded = fmt.Errorf("recv window exceeded")
 
+	// ErrHeaderWriteTimeout indicates that we hit an IO deadline waiting
+	// for a header to be written.
+	ErrHeaderWriteTimeout = fmt.Errorf("header write timeout")
+
 	// ErrTimeout is used when we reach an IO deadline
 	ErrTimeout = fmt.Errorf("i/o deadline reached")
 
