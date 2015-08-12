@@ -327,13 +327,19 @@ func (s *Session) waitForSendErr(hdr header, body io.Reader, errCh chan error) e
 	}
 }
 
-// sendNoWait does a send without waiting
+// sendNoWait does a send without waiting. Since there's still a case where
+// sendCh itself can be full, we will enforce the configured HeaderWriteTimeout,
+// since this is a small control header.
 func (s *Session) sendNoWait(hdr header) error {
+	timeout := time.After(s.config.HeaderWriteTimeout)
+
 	select {
 	case s.sendCh <- sendReady{Hdr: hdr}:
 		return nil
 	case <-s.shutdownCh:
 		return ErrSessionShutdown
+	case <-timeout:
+		return ErrHeaderWriteTimeout
 	}
 }
 
@@ -481,8 +487,7 @@ func (s *Session) handlePing(hdr header) error {
 	if flags&flagSYN == flagSYN {
 		hdr := header(make([]byte, headerSize))
 		hdr.encode(typePing, flagACK, 0, pingID)
-		s.sendNoWait(hdr)
-		return nil
+		return s.sendNoWait(hdr)
 	}
 
 	// Handle a response
