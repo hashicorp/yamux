@@ -305,7 +305,10 @@ func (s *Session) waitForSend(hdr header, body io.Reader) error {
 func (s *Session) waitForSendErr(hdr header, body io.Reader, errCh chan error) error {
 	var timeout <- chan time.Time
 	if body == nil {
-		timeout = time.After(s.config.HeaderWriteTimeout)
+		timer := time.NewTimer(s.config.HeaderWriteTimeout)
+		defer timer.Stop()
+
+		timeout = timer.C
 	}
 
 	ready := sendReady{Hdr: hdr, Body: body, Err: errCh}
@@ -331,14 +334,15 @@ func (s *Session) waitForSendErr(hdr header, body io.Reader, errCh chan error) e
 // sendCh itself can be full, we will enforce the configured HeaderWriteTimeout,
 // since this is a small control header.
 func (s *Session) sendNoWait(hdr header) error {
-	timeout := time.After(s.config.HeaderWriteTimeout)
+	timer := time.NewTimer(s.config.HeaderWriteTimeout)
+	defer timer.Stop()
 
 	select {
 	case s.sendCh <- sendReady{Hdr: hdr}:
 		return nil
 	case <-s.shutdownCh:
 		return ErrSessionShutdown
-	case <-timeout:
+	case <-timer.C:
 		return ErrHeaderWriteTimeout
 	}
 }

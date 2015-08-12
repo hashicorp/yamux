@@ -44,7 +44,7 @@ func testClientServer() (*Session, *Session) {
 	conf := DefaultConfig()
 	conf.AcceptBacklog = 64
 	conf.KeepAliveInterval = 100 * time.Millisecond
-	conf.HeaderWriteTimeout = 100 * time.Millisecond
+	conf.HeaderWriteTimeout = 250 * time.Millisecond
 	return testClientServerConfig(conf)
 }
 
