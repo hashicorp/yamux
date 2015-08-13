@@ -501,6 +501,7 @@ func (s *Session) handlePing(hdr header) error {
 				s.logger.Printf("[WARN] yamux: failed to send ping reply: %v", err)
 			}
 		}()
+		return nil
 	}
 
 	// Handle a response
