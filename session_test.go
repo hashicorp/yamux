@@ -14,6 +14,7 @@ import (
 type pipeConn struct {
 	reader *io.PipeReader
 	writer *io.PipeWriter
+	writeBlocker sync.Mutex
 }
 
 func (p *pipeConn) Read(b []byte) (int, error) {
@@ -21,6 +22,8 @@ func (p *pipeConn) Read(b []byte) (int, error) {
 }
 
 func (p *pipeConn) Write(b []byte) (int, error) {
+	p.writeBlocker.Lock()
+	defer p.writeBlocker.Unlock()
 	return p.writer.Write(b)
 }
 
@@ -32,13 +35,16 @@ func (p *pipeConn) Close() error {
 func testConn() (io.ReadWriteCloser, io.ReadWriteCloser) {
 	read1, write1 := io.Pipe()
 	read2, write2 := io.Pipe()
-	return &pipeConn{read1, write2}, &pipeConn{read2, write1}
+	conn1 := &pipeConn{reader: read1, writer: write2}
+	conn2 := &pipeConn{reader: read2, writer: write1}
+	return conn1, conn2
 }
 
 func testClientServer() (*Session, *Session) {
 	conf := DefaultConfig()
 	conf.AcceptBacklog = 64
 	conf.KeepAliveInterval = 100 * time.Millisecond
+	conf.HeaderWriteTimeout = 250 * time.Millisecond
 	return testClientServerConfig(conf)
 }
 
@@ -798,4 +804,178 @@ func TestBacklogExceeded_Accept(t *testing.T) {
 			t.Fatalf("err: %v", err)
 		}
 	}
+}
+
+func TestSession_WindowUpdateWriteDuringRead(t *testing.T) {
+	client, server := testClientServer()
+	defer client.Close()
+	defer server.Close()
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+
+	// Choose a huge flood size that we know will result in a window update.
+	flood := int64(client.config.MaxStreamWindowSize) - 1
+
+	// The server will accept a new stream and then flood data to it.
+	go func() {
+		defer wg.Done()
+
+		stream, err := server.AcceptStream()
+		if err != nil {
+			t.Fatalf("err: %v", err)
+		}
+		defer stream.Close()
+
+		n, err := stream.Write(make([]byte, flood))
+		if err != nil {
+			t.Fatalf("err: %v", err)
+		}
+		if int64(n) != flood {
+			t.Fatalf("short write: %d", n)
+		}
+	}()
+
+	// The client will open a stream, block outbound writes, and then
+	// listen to the flood from the server, which should time out since
+	// it won't be able to send the window update.
+	go func() {
+		defer wg.Done()
+
+		stream, err := client.OpenStream()
+		if err != nil {
+			t.Fatalf("err: %v", err)
+		}
+		defer stream.Close()
+
+		conn := client.conn.(*pipeConn)
+		conn.writeBlocker.Lock()
+
+		_, err = stream.Read(make([]byte, flood))
+		if err != ErrHeaderWriteTimeout {
+			t.Fatalf("err: %v", err)
+		}
+	}()
+
+	wg.Wait()
+}
+
+func TestSession_sendNoWait_Timeout(t *testing.T) {
+	client, server := testClientServer()
+	defer client.Close()
+	defer server.Close()
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+
+	go func() {
+		defer wg.Done()
+
+		stream, err := server.AcceptStream()
+		if err != nil {
+			t.Fatalf("err: %v", err)
+		}
+		defer stream.Close()
+	}()
+
+	// The client will open the stream and then block outbound writes, we'll
+	// probe sendNoWait once it gets into that state.
+	go func() {
+		defer wg.Done()
+
+		stream, err := client.OpenStream()
+		if err != nil {
+			t.Fatalf("err: %v", err)
+		}
+		defer stream.Close()
+
+		conn := client.conn.(*pipeConn)
+		conn.writeBlocker.Lock()
+
+		hdr := header(make([]byte, headerSize))
+		hdr.encode(typePing, flagACK, 0, 0)
+		for {
+			err = client.sendNoWait(hdr)
+			if err == nil {
+				continue
+			} else if err == ErrHeaderWriteTimeout {
+				break
+			} else {
+				t.Fatalf("err: %v", err)
+			}
+		}
+	}()
+
+	wg.Wait()
+}
+
+func TestSession_PingOfDeath(t *testing.T) {
+	client, server := testClientServer()
+	defer client.Close()
+	defer server.Close()
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+
+	var doPingOfDeath sync.Mutex
+	doPingOfDeath.Lock()
+
+	// This is used later to block outbound writes.
+	conn := server.conn.(*pipeConn)
+
+	// The server will accept a stream, block outbound writes, and then
+	// flood its send channel so that no more headers can be queued.
+	go func() {
+		defer wg.Done()
+
+		stream, err := server.AcceptStream()
+		if err != nil {
+			t.Fatalf("err: %v", err)
+		}
+		defer stream.Close()
+
+		conn.writeBlocker.Lock()
+		for {
+			hdr := header(make([]byte, headerSize))
+			hdr.encode(typePing, 0, 0, 0)
+			err = server.sendNoWait(hdr)
+			if err == nil {
+				continue
+			} else if err == ErrHeaderWriteTimeout {
+				break
+			} else {
+				t.Fatalf("err: %v", err)
+			}
+		}
+
+		doPingOfDeath.Unlock()
+	}()
+
+	// The client will open a stream and then send the server a ping once it
+	// can no longer write. This makes sure the server doesn't deadlock reads
+	// while trying to reply to the ping with no ability to write.
+	go func() {
+		defer wg.Done()
+
+		stream, err := client.OpenStream()
+		if err != nil {
+			t.Fatalf("err: %v", err)
+		}
+		defer stream.Close()
+
+		// This ping will never unblock because the ping id will never
+		// show up in a response.
+		doPingOfDeath.Lock()
+		go func() { client.Ping() }()
+
+		// Wait for a while to make sure the previous ping times out,
+		// then turn writes back on and make sure a ping works again.
+		time.Sleep(2 * server.config.HeaderWriteTimeout)
+		conn.writeBlocker.Unlock()
+		if _, err = client.Ping(); err != nil {
+			t.Fatalf("err: %v", err)
+		}
+	}()
+
+	wg.Wait()
 }

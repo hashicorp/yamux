@@ -20,6 +20,12 @@ type Config struct {
 	// KeepAliveInterval is how often to perform the keep alive
 	KeepAliveInterval time.Duration
 
+	// HeaderWriteTimeout is how long we will wait to perform a blocking
+	// operation writing a header, after which we will throw an error and
+	// close the stream. Headers are small, so this should be set to a value
+	// after which you suspect there is something wrong with the connection.
+	HeaderWriteTimeout time.Duration
+
 	// MaxStreamWindowSize is used to control the maximum
 	// window size that we allow for a stream.
 	MaxStreamWindowSize uint32
@@ -34,6 +40,7 @@ func DefaultConfig() *Config {
 		AcceptBacklog:       256,
 		EnableKeepAlive:     true,
 		KeepAliveInterval:   30 * time.Second,
+		HeaderWriteTimeout:  10 * time.Second,
 		MaxStreamWindowSize: initialStreamWindow,
 		LogOutput:           os.Stderr,
 	}

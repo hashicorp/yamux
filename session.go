@@ -299,29 +299,51 @@ func (s *Session) waitForSend(hdr header, body io.Reader) error {
 	return s.waitForSendErr(hdr, body, errCh)
 }
 
-// waitForSendErr waits to send a header, checking for a potential shutdown
+// waitForSendErr waits to send a header with optional data, checking for a
+// potential shutdown. If the body is not supplied then we will enforce the
+// configured HeaderWriteTimeout, since this is a small control header.
 func (s *Session) waitForSendErr(hdr header, body io.Reader, errCh chan error) error {
+	var timeout <- chan time.Time
+	if body == nil {
+		timer := time.NewTimer(s.config.HeaderWriteTimeout)
+		defer timer.Stop()
+
+		timeout = timer.C
+	}
+
 	ready := sendReady{Hdr: hdr, Body: body, Err: errCh}
 	select {
 	case s.sendCh <- ready:
 	case <-s.shutdownCh:
 		return ErrSessionShutdown
+	case <-timeout:
+		return ErrHeaderWriteTimeout
 	}
+
 	select {
 	case err := <-errCh:
 		return err
 	case <-s.shutdownCh:
 		return ErrSessionShutdown
+	case <-timeout:
+		return ErrHeaderWriteTimeout
 	}
 }
 
-// sendNoWait does a send without waiting
+// sendNoWait does a send without waiting. Since there's still a case where
+// sendCh itself can be full, we will enforce the configured HeaderWriteTimeout,
+// since this is a small control header.
 func (s *Session) sendNoWait(hdr header) error {
+	timer := time.NewTimer(s.config.HeaderWriteTimeout)
+	defer timer.Stop()
+
 	select {
 	case s.sendCh <- sendReady{Hdr: hdr}:
 		return nil
 	case <-s.shutdownCh:
 		return ErrSessionShutdown
+	case <-timer.C:
+		return ErrHeaderWriteTimeout
 	}
 }
 
@@ -446,7 +468,9 @@ func (s *Session) handleStreamMessage(hdr header) error {
 	// Check if this is a window update
 	if hdr.MsgType() == typeWindowUpdate {
 		if err := stream.incrSendWindow(hdr, flags); err != nil {
-			s.sendNoWait(s.goAway(goAwayProtoErr))
+			if sendErr := s.sendNoWait(s.goAway(goAwayProtoErr)); sendErr != nil {
+				s.logger.Printf("[WARN] yamux: failed to send go away: %v", sendErr)
+			}
 			return err
 		}
 		return nil
@@ -454,7 +478,9 @@ func (s *Session) handleStreamMessage(hdr header) error {
 
 	// Read the new data
 	if err := stream.readData(hdr, flags, s.bufRead); err != nil {
-		s.sendNoWait(s.goAway(goAwayProtoErr))
+		if sendErr := s.sendNoWait(s.goAway(goAwayProtoErr)); sendErr != nil {
+			s.logger.Printf("[WARN] yamux: failed to send go away: %v", sendErr)
+		}
 		return err
 	}
 	return nil
@@ -465,11 +491,16 @@ func (s *Session) handlePing(hdr header) error {
 	flags := hdr.Flags()
 	pingID := hdr.Length()
 
-	// Check if this is a query, respond back
+	// Check if this is a query, respond back in a separate context so we
+	// don't interfere with the receiving thread blocking for the write.
 	if flags&flagSYN == flagSYN {
-		hdr := header(make([]byte, headerSize))
-		hdr.encode(typePing, flagACK, 0, pingID)
-		s.sendNoWait(hdr)
+		go func() {
+			hdr := header(make([]byte, headerSize))
+			hdr.encode(typePing, flagACK, 0, pingID)
+			if err := s.sendNoWait(hdr); err != nil {
+				s.logger.Printf("[WARN] yamux: failed to send ping reply: %v", err)
+			}
+		}()
 		return nil
 	}
 
@@ -521,7 +552,9 @@ func (s *Session) incomingStream(id uint32) error {
 	// Check if stream already exists
 	if _, ok := s.streams[id]; ok {
 		s.logger.Printf("[ERR] yamux: duplicate stream declared")
-		s.sendNoWait(s.goAway(goAwayProtoErr))
+		if sendErr := s.sendNoWait(s.goAway(goAwayProtoErr)); sendErr != nil {
+			s.logger.Printf("[WARN] yamux: failed to send go away: %v", sendErr)
+		}
 		return ErrDuplicateStream
 	}
 
