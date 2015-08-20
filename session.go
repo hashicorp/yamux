@@ -300,24 +300,19 @@ func (s *Session) waitForSend(hdr header, body io.Reader) error {
 }
 
 // waitForSendErr waits to send a header with optional data, checking for a
-// potential shutdown. If the body is not supplied then we will enforce the
-// configured HeaderWriteTimeout, since this is a small control header.
+// potential shutdown. Since there's the expectation that sends can happen
+// in a timely manner, we enforce the connection write timeout here.
 func (s *Session) waitForSendErr(hdr header, body io.Reader, errCh chan error) error {
-	var timeout <- chan time.Time
-	if body == nil {
-		timer := time.NewTimer(s.config.HeaderWriteTimeout)
-		defer timer.Stop()
-
-		timeout = timer.C
-	}
+	timer := time.NewTimer(s.config.ConnectionWriteTimeout)
+	defer timer.Stop()
 
 	ready := sendReady{Hdr: hdr, Body: body, Err: errCh}
 	select {
 	case s.sendCh <- ready:
 	case <-s.shutdownCh:
 		return ErrSessionShutdown
-	case <-timeout:
-		return ErrHeaderWriteTimeout
+	case <-timer.C:
+		return ErrConnectionWriteTimeout
 	}
 
 	select {
@@ -325,16 +320,16 @@ func (s *Session) waitForSendErr(hdr header, body io.Reader, errCh chan error) e
 		return err
 	case <-s.shutdownCh:
 		return ErrSessionShutdown
-	case <-timeout:
-		return ErrHeaderWriteTimeout
+	case <-timer.C:
+		return ErrConnectionWriteTimeout
 	}
 }
 
-// sendNoWait does a send without waiting. Since there's still a case where
-// sendCh itself can be full, we will enforce the configured HeaderWriteTimeout,
-// since this is a small control header.
+// sendNoWait does a send without waiting. Since there's the expectation that
+// the send happens right here, we enforce the connection write timeout if we
+// can't queue the header to be sent.
 func (s *Session) sendNoWait(hdr header) error {
-	timer := time.NewTimer(s.config.HeaderWriteTimeout)
+	timer := time.NewTimer(s.config.ConnectionWriteTimeout)
 	defer timer.Stop()
 
 	select {
@@ -343,7 +338,7 @@ func (s *Session) sendNoWait(hdr header) error {
 	case <-s.shutdownCh:
 		return ErrSessionShutdown
 	case <-timer.C:
-		return ErrHeaderWriteTimeout
+		return ErrConnectionWriteTimeout
 	}
 }
 
