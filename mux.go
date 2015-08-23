@@ -20,8 +20,8 @@ type Config struct {
 	// KeepAliveInterval is how often to perform the keep alive
 	KeepAliveInterval time.Duration
 
-	// KeepAliveTimeout timeout after we close the session if
-	// the keepAlive response is not received
+	// KeepAliveTimeout is the duration within keepAlive must respond
+	// after ping. If a response is not received the session is closed.
 	KeepAliveTimeout time.Duration
 
 	// ConnectionWriteTimeout is meant to be a "safety valve" timeout after
@@ -44,7 +44,7 @@ func DefaultConfig() *Config {
 		AcceptBacklog:          256,
 		EnableKeepAlive:        true,
 		KeepAliveInterval:      30 * time.Second,
-		KeepAliveTimeout:      10 * time.Second,
+		KeepAliveTimeout:       10 * time.Second,
 		ConnectionWriteTimeout: 10 * time.Second,
 		MaxStreamWindowSize:    initialStreamWindow,
 		LogOutput:              os.Stderr,
@@ -53,7 +53,7 @@ func DefaultConfig() *Config {
 
 // VerifyConfig is used to verify the sanity of configuration
 func VerifyConfig(config *Config) error {
-	switch{
+	switch {
 	case config.AcceptBacklog <= 0:
 		return fmt.Errorf("backlog must be positive")
 	case config.KeepAliveInterval == 0:
