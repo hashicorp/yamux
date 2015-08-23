@@ -12,6 +12,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"errors"
 )
 
 // Session is used to wrap a reliable ordered connection and to
@@ -272,6 +273,8 @@ func (s *Session) Ping() (time.Duration, error) {
 	start := time.Now()
 	select {
 	case <-ch:
+	case <- time.After(s.config.KeepAliveTimeout):
+		return 0, errors.New("Ping timeout")
 	case <-s.shutdownCh:
 		return 0, ErrSessionShutdown
 	}
@@ -283,10 +286,14 @@ func (s *Session) Ping() (time.Duration, error) {
 // keepalive is a long running goroutine that periodically does
 // a ping to keep the connection alive.
 func (s *Session) keepalive() {
+	var err error
 	for {
 		select {
 		case <-time.After(s.config.KeepAliveInterval):
-			s.Ping()
+			// Some logging/debug would be nice...
+			if _, err = s.Ping(); err !=nil{
+				s.Close()
+			}
 		case <-s.shutdownCh:
 			return
 		}
