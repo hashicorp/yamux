@@ -346,7 +346,23 @@ func TestGoAway(t *testing.T) {
 		t.Fatalf("err: %v", err)
 	}
 }
-
+func TestGoAwayClient(t *testing.T) {
+	client, server := testClientServer()
+	defer client.Close()
+	defer server.Close()
+	done := make(chan struct{}, 1)
+	go func(){
+		if err := client.GoAway(); err != nil {
+			t.Fatalf("err: %v", err)
+		}
+		close(done)
+	}()
+	<- done
+	_, err := server.Accept()
+	if err != ErrRemoteGoAway {
+		t.Errorf("err: %v", err)
+	}
+}
 func TestManyStreams(t *testing.T) {
 	client, server := testClientServer()
 	defer client.Close()
