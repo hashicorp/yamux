@@ -189,6 +189,9 @@ func (s *Session) Accept() (net.Conn, error) {
 // AcceptStream is used to block until the next available stream
 // is ready to be accepted.
 func (s *Session) AcceptStream() (*Stream, error) {
+	if atomic.LoadInt32(&s.remoteGoAway) == 1 {
+		return nil, ErrRemoteGoAway
+	}
 	select {
 	case stream := <-s.acceptCh:
 		if err := stream.sendWindowUpdate(); err != nil {
