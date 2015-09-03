@@ -58,6 +58,9 @@ type Session struct {
 	// acceptCh is used to pass ready streams to the client
 	acceptCh chan *Stream
 
+	// goAwayCh is used to notify AcceptStream of GoAway requests
+	goAwayCh chan struct{}
+
 	// sendCh is used to mark a stream as ready to send,
 	// or to send a header out directly.
 	sendCh chan sendReady
@@ -92,6 +95,7 @@ func newSession(config *Config, conn io.ReadWriteCloser, client bool) *Session {
 		streams:    make(map[uint32]*Stream),
 		synCh:      make(chan struct{}, config.AcceptBacklog),
 		acceptCh:   make(chan *Stream, config.AcceptBacklog),
+		goAwayCh: make(chan struct{}, 1),
 		sendCh:     make(chan sendReady, 64),
 		recvDoneCh: make(chan struct{}),
 		shutdownCh: make(chan struct{}),
@@ -199,6 +203,8 @@ func (s *Session) AcceptStream() (*Stream, error) {
 		return stream, nil
 	case <-s.shutdownCh:
 		return nil, s.shutdownErr
+	case <- s.goAwayCh:
+		return nil, ErrRemoteGoAway
 	}
 }
 
@@ -419,6 +425,10 @@ func (s *Session) recvLoop() error {
 			handler = s.handleStreamMessage
 		case typeGoAway:
 			handler = s.handleGoAway
+			select{
+			case s.goAwayCh <- struct{}{}:
+			default:
+		}
 		case typePing:
 			handler = s.handlePing
 		default:
