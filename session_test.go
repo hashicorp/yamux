@@ -352,13 +352,13 @@ func TestGoAwayClient(t *testing.T) {
 	defer client.Close()
 	defer server.Close()
 	done := make(chan struct{}, 1)
-	go func(){
+	go func() {
 		if err := client.GoAway(); err != nil {
 			t.Fatalf("err: %v", err)
 		}
 		close(done)
 	}()
-	<- done
+	<-done
 	_, err := server.Accept()
 	if err != ErrRemoteGoAway {
 		t.Errorf("err: %v", err)
@@ -368,25 +368,25 @@ func TestGoAwayClient(t *testing.T) {
 	defer client2.Close()
 	defer server2.Close()
 	done = make(chan struct{}, 1)
-	go func(){
-		<- done
-		time.Sleep(500 *time.Millisecond)
+	go func() {
+		<-done
+		time.Sleep(500 * time.Millisecond)
 		if err := client2.GoAway(); err != nil {
 			t.Fatalf("err: %v", err)
 		}
 	}()
 	errCh := make(chan error, 1)
-	go func(){
+	go func() {
 		close(done)
 		_, err := server2.Accept()
 		errCh <- err
 	}()
-	select{
-	case err = <- errCh:
+	select {
+	case err = <-errCh:
 		if err != ErrRemoteGoAway {
 			t.Errorf("err: %v", err)
 		}
-	case <- time.After(2 *time.Second):
+	case <-time.After(2 * time.Second):
 		t.Errorf("Timeout awaiting ErrRemoteGoAway")
 	}
 }

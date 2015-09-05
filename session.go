@@ -95,7 +95,6 @@ func newSession(config *Config, conn io.ReadWriteCloser, client bool) *Session {
 		streams:    make(map[uint32]*Stream),
 		synCh:      make(chan struct{}, config.AcceptBacklog),
 		acceptCh:   make(chan *Stream, config.AcceptBacklog),
-		goAwayCh: make(chan struct{}, 1),
 		sendCh:     make(chan sendReady, 64),
 		recvDoneCh: make(chan struct{}),
 		shutdownCh: make(chan struct{}),
@@ -103,6 +102,7 @@ func newSession(config *Config, conn io.ReadWriteCloser, client bool) *Session {
 	if client {
 		s.nextStreamID = 1
 	} else {
+		s.goAwayCh = make(chan struct{})
 		s.nextStreamID = 2
 	}
 	go s.recv()
@@ -203,7 +203,7 @@ func (s *Session) AcceptStream() (*Stream, error) {
 		return stream, nil
 	case <-s.shutdownCh:
 		return nil, s.shutdownErr
-	case <- s.goAwayCh:
+	case <-s.goAwayCh:
 		return nil, ErrRemoteGoAway
 	}
 }
@@ -425,10 +425,6 @@ func (s *Session) recvLoop() error {
 			handler = s.handleStreamMessage
 		case typeGoAway:
 			handler = s.handleGoAway
-			select{
-			case s.goAwayCh <- struct{}{}:
-			default:
-		}
 		case typePing:
 			handler = s.handlePing
 		default:
@@ -529,6 +525,10 @@ func (s *Session) handleGoAway(hdr header) error {
 	switch code {
 	case goAwayNormal:
 		atomic.SwapInt32(&s.remoteGoAway, 1)
+		select {
+		case s.goAwayCh <- struct{}{}:
+		default:
+		}
 	case goAwayProtoErr:
 		s.logger.Printf("[ERR] yamux: received protocol error go away")
 		return fmt.Errorf("yamux protocol error")
