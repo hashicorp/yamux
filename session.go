@@ -272,6 +272,8 @@ func (s *Session) Ping() (time.Duration, error) {
 	start := time.Now()
 	select {
 	case <-ch:
+	case <-time.After(s.config.ConnectionWriteTimeout):
+		return 0, ErrTimeout
 	case <-s.shutdownCh:
 		return 0, ErrSessionShutdown
 	}
@@ -286,7 +288,11 @@ func (s *Session) keepalive() {
 	for {
 		select {
 		case <-time.After(s.config.KeepAliveInterval):
-			s.Ping()
+			_, err := s.Ping()
+			if err != nil {
+				s.logger.Printf("[ERR] yamux: keepalive failed: %v", err)
+				s.Close()
+			}
 		case <-s.shutdownCh:
 			return
 		}

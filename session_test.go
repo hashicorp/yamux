@@ -40,12 +40,22 @@ func testConn() (io.ReadWriteCloser, io.ReadWriteCloser) {
 	return conn1, conn2
 }
 
-func testClientServer() (*Session, *Session) {
+func testConf() *Config {
 	conf := DefaultConfig()
 	conf.AcceptBacklog = 64
 	conf.KeepAliveInterval = 100 * time.Millisecond
 	conf.ConnectionWriteTimeout = 250 * time.Millisecond
-	return testClientServerConfig(conf)
+	return conf
+}
+
+func testConfNoKeepAlive() *Config {
+	conf := testConf()
+	conf.EnableKeepAlive = false
+	return conf
+}
+
+func testClientServer() (*Session, *Session) {
+	return testClientServerConfig(testConf())
 }
 
 func testClientServerConfig(conf *Config) (*Session, *Session) {
@@ -807,7 +817,7 @@ func TestBacklogExceeded_Accept(t *testing.T) {
 }
 
 func TestSession_WindowUpdateWriteDuringRead(t *testing.T) {
-	client, server := testClientServer()
+	client, server := testClientServerConfig(testConfNoKeepAlive())
 	defer client.Close()
 	defer server.Close()
 
@@ -861,7 +871,7 @@ func TestSession_WindowUpdateWriteDuringRead(t *testing.T) {
 }
 
 func TestSession_sendNoWait_Timeout(t *testing.T) {
-	client, server := testClientServer()
+	client, server := testClientServerConfig(testConfNoKeepAlive())
 	defer client.Close()
 	defer server.Close()
 
@@ -910,7 +920,7 @@ func TestSession_sendNoWait_Timeout(t *testing.T) {
 }
 
 func TestSession_PingOfDeath(t *testing.T) {
-	client, server := testClientServer()
+	client, server := testClientServerConfig(testConfNoKeepAlive())
 	defer client.Close()
 	defer server.Close()
 
@@ -981,13 +991,7 @@ func TestSession_PingOfDeath(t *testing.T) {
 }
 
 func TestSession_ConnectionWriteTimeout(t *testing.T) {
-	// Disable keepalives so they don't detect the failed connection
-	// before the user's write does.
-	conf := DefaultConfig()
-	conf.EnableKeepAlive = false
-	conf.ConnectionWriteTimeout = 250 * time.Millisecond
-
-	client, server := testClientServerConfig(conf)
+	client, server := testClientServerConfig(testConfNoKeepAlive())
 	defer client.Close()
 	defer server.Close()
 
