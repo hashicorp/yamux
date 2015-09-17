@@ -5,11 +5,30 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
+	"log"
+	"reflect"
 	"runtime"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 )
+
+type logCapture struct{ bytes.Buffer }
+
+func (l *logCapture) logs() []string {
+	return strings.Split(strings.TrimSpace(l.String()), "\n")
+}
+
+func (l *logCapture) match(expect []string) bool {
+	return reflect.DeepEqual(l.logs(), expect)
+}
+
+func captureLogs(s *Session) *logCapture {
+	buf := new(logCapture)
+	s.logger = log.New(buf, "", 0)
+	return buf
+}
 
 type pipeConn struct {
 	reader       *io.PipeReader
@@ -40,12 +59,22 @@ func testConn() (io.ReadWriteCloser, io.ReadWriteCloser) {
 	return conn1, conn2
 }
 
-func testClientServer() (*Session, *Session) {
+func testConf() *Config {
 	conf := DefaultConfig()
 	conf.AcceptBacklog = 64
 	conf.KeepAliveInterval = 100 * time.Millisecond
 	conf.ConnectionWriteTimeout = 250 * time.Millisecond
-	return testClientServerConfig(conf)
+	return conf
+}
+
+func testConfNoKeepAlive() *Config {
+	conf := testConf()
+	conf.EnableKeepAlive = false
+	return conf
+}
+
+func testClientServer() (*Session, *Session) {
+	return testClientServerConfig(testConf())
 }
 
 func testClientServerConfig(conf *Config) (*Session, *Session) {
@@ -74,6 +103,48 @@ func TestPing(t *testing.T) {
 	}
 	if rtt == 0 {
 		t.Fatalf("bad: %v", rtt)
+	}
+}
+
+func TestPing_Timeout(t *testing.T) {
+	client, server := testClientServerConfig(testConfNoKeepAlive())
+	defer client.Close()
+	defer server.Close()
+
+	// Prevent the client from responding
+	clientConn := client.conn.(*pipeConn)
+	clientConn.writeBlocker.Lock()
+
+	errCh := make(chan error, 1)
+	go func() {
+		_, err := server.Ping() // Ping via the server session
+		errCh <- err
+	}()
+
+	select {
+	case err := <-errCh:
+		if err != ErrTimeout {
+			t.Fatalf("err: %v", err)
+		}
+	case <-time.After(client.config.ConnectionWriteTimeout * 2):
+		t.Fatalf("failed to timeout within expected %v", client.config.ConnectionWriteTimeout)
+	}
+
+	// Verify that we recover, even if we gave up
+	clientConn.writeBlocker.Unlock()
+
+	go func() {
+		_, err := server.Ping() // Ping via the server session
+		errCh <- err
+	}()
+
+	select {
+	case err := <-errCh:
+		if err != nil {
+			t.Fatalf("err: %v", err)
+		}
+	case <-time.After(client.config.ConnectionWriteTimeout):
+		t.Fatalf("timeout")
 	}
 }
 
@@ -663,6 +734,49 @@ func TestKeepAlive(t *testing.T) {
 	}
 }
 
+func TestKeepAlive_Timeout(t *testing.T) {
+	conn1, conn2 := testConn()
+
+	clientConf := testConf()
+	clientConf.ConnectionWriteTimeout = time.Hour // We're testing keep alives, not connection writes
+	clientConf.EnableKeepAlive = false            // Just test one direction, so it's deterministic who hangs up on whom
+	client, _ := Client(conn1, clientConf)
+	defer client.Close()
+
+	server, _ := Server(conn2, testConf())
+	defer server.Close()
+
+	_ = captureLogs(client) // Client logs aren't part of the test
+	serverLogs := captureLogs(server)
+
+	errCh := make(chan error, 1)
+	go func() {
+		_, err := server.Accept() // Wait until server closes
+		errCh <- err
+	}()
+
+	// Prevent the client from responding
+	clientConn := client.conn.(*pipeConn)
+	clientConn.writeBlocker.Lock()
+
+	select {
+	case err := <-errCh:
+		if err != ErrKeepAliveTimeout {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	case <-time.After(1 * time.Second):
+		t.Fatalf("timeout waiting for timeout")
+	}
+
+	if !server.IsClosed() {
+		t.Fatalf("server should have closed")
+	}
+
+	if !serverLogs.match([]string{"[ERR] yamux: keepalive failed: i/o deadline reached"}) {
+		t.Fatalf("server log incorect: %v", serverLogs.logs())
+	}
+}
+
 func TestLargeWindow(t *testing.T) {
 	conf := DefaultConfig()
 	conf.MaxStreamWindowSize *= 2
@@ -807,7 +921,7 @@ func TestBacklogExceeded_Accept(t *testing.T) {
 }
 
 func TestSession_WindowUpdateWriteDuringRead(t *testing.T) {
-	client, server := testClientServer()
+	client, server := testClientServerConfig(testConfNoKeepAlive())
 	defer client.Close()
 	defer server.Close()
 
@@ -861,7 +975,7 @@ func TestSession_WindowUpdateWriteDuringRead(t *testing.T) {
 }
 
 func TestSession_sendNoWait_Timeout(t *testing.T) {
-	client, server := testClientServer()
+	client, server := testClientServerConfig(testConfNoKeepAlive())
 	defer client.Close()
 	defer server.Close()
 
@@ -910,7 +1024,7 @@ func TestSession_sendNoWait_Timeout(t *testing.T) {
 }
 
 func TestSession_PingOfDeath(t *testing.T) {
-	client, server := testClientServer()
+	client, server := testClientServerConfig(testConfNoKeepAlive())
 	defer client.Close()
 	defer server.Close()
 
@@ -981,13 +1095,7 @@ func TestSession_PingOfDeath(t *testing.T) {
 }
 
 func TestSession_ConnectionWriteTimeout(t *testing.T) {
-	// Disable keepalives so they don't detect the failed connection
-	// before the user's write does.
-	conf := DefaultConfig()
-	conf.EnableKeepAlive = false
-	conf.ConnectionWriteTimeout = 250 * time.Millisecond
-
-	client, server := testClientServerConfig(conf)
+	client, server := testClientServerConfig(testConfNoKeepAlive())
 	defer client.Close()
 	defer server.Close()
 

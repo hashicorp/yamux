@@ -48,6 +48,9 @@ var (
 	// ErrConnectionWriteTimeout indicates that we hit the "safety valve"
 	// timeout writing to the underlying stream connection.
 	ErrConnectionWriteTimeout = fmt.Errorf("connection write timeout")
+
+	// ErrKeepAliveTimeout is sent if a missed keepalive caused the stream close
+	ErrKeepAliveTimeout = fmt.Errorf("keepalive timeout")
 )
 
 const (
