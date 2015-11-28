@@ -496,6 +496,7 @@ func TestManyStreams_PingPong(t *testing.T) {
 
 		buf := make([]byte, 4)
 		for {
+			// Read the 'ping'
 			n, err := stream.Read(buf)
 			if err == io.EOF {
 				return
@@ -509,6 +510,11 @@ func TestManyStreams_PingPong(t *testing.T) {
 			if !bytes.Equal(buf, ping) {
 				t.Fatalf("bad: %s", buf)
 			}
+
+			// Shrink the internal buffer!
+			stream.Shrink()
+
+			// Write out the 'pong'
 			n, err = stream.Write(pong)
 			if err != nil {
 				t.Fatalf("err: %v", err)
@@ -520,7 +526,7 @@ func TestManyStreams_PingPong(t *testing.T) {
 	}
 	sender := func(i int) {
 		defer wg.Done()
-		stream, err := client.Open()
+		stream, err := client.OpenStream()
 		if err != nil {
 			t.Fatalf("err: %v", err)
 		}
@@ -528,6 +534,7 @@ func TestManyStreams_PingPong(t *testing.T) {
 
 		buf := make([]byte, 4)
 		for i := 0; i < 1000; i++ {
+			// Send the 'ping'
 			n, err := stream.Write(ping)
 			if err != nil {
 				t.Fatalf("err: %v", err)
@@ -536,6 +543,7 @@ func TestManyStreams_PingPong(t *testing.T) {
 				t.Fatalf("short write %d", n)
 			}
 
+			// Read the 'pong'
 			n, err = stream.Read(buf)
 			if err != nil {
 				t.Fatalf("err: %v", err)
@@ -546,6 +554,9 @@ func TestManyStreams_PingPong(t *testing.T) {
 			if !bytes.Equal(buf, pong) {
 				t.Fatalf("bad: %s", buf)
 			}
+
+			// Shrink the buffer
+			stream.Shrink()
 		}
 	}
 

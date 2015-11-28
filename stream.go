@@ -439,3 +439,14 @@ func (s *Stream) SetWriteDeadline(t time.Time) error {
 	s.writeDeadline = t
 	return nil
 }
+
+// Shrink is used to compact the amount of buffers utilized
+// This is useful when using Yamux in a connection pool to reduce
+// the idle memory utilization.
+func (s *Stream) Shrink() {
+	s.recvLock.Lock()
+	if s.recvBuf != nil && s.recvBuf.Len() == 0 {
+		s.recvBuf = nil
+	}
+	s.recvLock.Unlock()
+}
