@@ -33,7 +33,7 @@ type Stream struct {
 	state     streamState
 	stateLock sync.Mutex
 
-	recvBuf  bytes.Buffer
+	recvBuf  *bytes.Buffer
 	recvLock sync.Mutex
 
 	controlHdr     header
@@ -91,7 +91,7 @@ START:
 	case streamRemoteClose:
 		fallthrough
 	case streamClosed:
-		if s.recvBuf.Len() == 0 {
+		if s.recvBuf == nil || s.recvBuf.Len() == 0 {
 			s.stateLock.Unlock()
 			return 0, io.EOF
 		}
@@ -103,7 +103,7 @@ START:
 
 	// If there is no data available, block
 	s.recvLock.Lock()
-	if s.recvBuf.Len() == 0 {
+	if s.recvBuf == nil || s.recvBuf.Len() == 0 {
 		s.recvLock.Unlock()
 		goto WAIT
 	}
@@ -397,7 +397,12 @@ func (s *Stream) readData(hdr header, flags uint16, conn io.Reader) error {
 
 	// Copy into buffer
 	s.recvLock.Lock()
-	if _, err := io.Copy(&s.recvBuf, conn); err != nil {
+	if s.recvBuf == nil {
+		// Allocate the receive buffer just-in-time to fit the full data frame.
+		// This way we can read in the whole packet without further allocations.
+		s.recvBuf = bytes.NewBuffer(make([]byte, 0, length))
+	}
+	if _, err := io.Copy(s.recvBuf, conn); err != nil {
 		s.session.logger.Printf("[ERR] yamux: Failed to read stream data: %v", err)
 		s.recvLock.Unlock()
 		return err
@@ -433,4 +438,15 @@ func (s *Stream) SetReadDeadline(t time.Time) error {
 func (s *Stream) SetWriteDeadline(t time.Time) error {
 	s.writeDeadline = t
 	return nil
+}
+
+// Shrink is used to compact the amount of buffers utilized
+// This is useful when using Yamux in a connection pool to reduce
+// the idle memory utilization.
+func (s *Stream) Shrink() {
+	s.recvLock.Lock()
+	if s.recvBuf != nil && s.recvBuf.Len() == 0 {
+		s.recvBuf = nil
+	}
+	s.recvLock.Unlock()
 }
