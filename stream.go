@@ -17,6 +17,7 @@ const (
 	streamEstablished
 	streamLocalClose
 	streamRemoteClose
+	streamEarlyClose
 	streamClosed
 	streamReset
 )
@@ -218,6 +219,9 @@ func (s *Stream) sendFlags() uint16 {
 	case streamSYNReceived:
 		flags |= flagACK
 		s.state = streamEstablished
+	case streamEarlyClose:
+		flags |= flagACK
+		s.state = streamRemoteClose
 	}
 	return flags
 }
@@ -331,9 +335,10 @@ func (s *Stream) processFlags(flags uint16) error {
 	}
 	if flags&flagFIN == flagFIN {
 		switch s.state {
-		case streamSYNSent:
-			fallthrough
 		case streamSYNReceived:
+			s.state = streamEarlyClose
+			s.notifyWaiting()
+		case streamSYNSent:
 			fallthrough
 		case streamEstablished:
 			s.state = streamRemoteClose
