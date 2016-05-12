@@ -148,6 +148,47 @@ func TestPing_Timeout(t *testing.T) {
 	}
 }
 
+func TestCloseBeforeAck(t *testing.T) {
+	cfg := testConf()
+	cfg.AcceptBacklog = 8
+	client, server := testClientServerConfig(cfg)
+
+	defer client.Close()
+	defer server.Close()
+
+	for i := 0; i < 8; i++ {
+		s, err := client.OpenStream()
+		if err != nil {
+			t.Fatal(err)
+		}
+		s.Close()
+	}
+
+	for i := 0; i < 8; i++ {
+		s, err := server.AcceptStream()
+		if err != nil {
+			t.Fatal(err)
+		}
+		s.Close()
+	}
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		s, err := client.OpenStream()
+		if err != nil {
+			t.Fatal(err)
+		}
+		s.Close()
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(time.Second * 5):
+		t.Fatal("timed out trying to open stream")
+	}
+}
+
 func TestAccept(t *testing.T) {
 	client, server := testClientServer()
 	defer client.Close()
