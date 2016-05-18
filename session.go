@@ -175,6 +175,11 @@ GET_ID:
 
 	// Send the window update to create
 	if err := stream.sendWindowUpdate(); err != nil {
+		select {
+		case <-s.synCh:
+		default:
+			s.logger.Printf("[ERR] aborted stream open without inflight syn semaphore")
+		}
 		return nil, err
 	}
 	return stream, nil
