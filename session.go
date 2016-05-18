@@ -178,7 +178,7 @@ GET_ID:
 		select {
 		case <-s.synCh:
 		default:
-			s.logger.Printf("[ERR] aborted stream open without inflight syn semaphore")
+			s.logger.Printf("[ERR] yamux: aborted stream open without inflight syn semaphore")
 		}
 		return nil, err
 	}
@@ -598,7 +598,7 @@ func (s *Session) closeStream(id uint32) {
 		select {
 		case <-s.synCh:
 		default:
-			s.logger.Printf("[ERR] un-established stream without inflight syn semaphore")
+			s.logger.Printf("[ERR] yamux: un-established stream without inflight syn semaphore")
 		}
 	}
 	delete(s.streams, id)
@@ -612,12 +612,12 @@ func (s *Session) establishStream(id uint32) {
 	if _, ok := s.inflight[id]; ok {
 		delete(s.inflight, id)
 	} else {
-		s.logger.Printf("[ERR] established stream without inflight syn entry")
+		s.logger.Printf("[ERR] yamux: established stream without inflight syn entry")
 	}
 	select {
 	case <-s.synCh:
 	default:
-		s.logger.Printf("[ERR] established stream without inflight syn semaphore")
+		s.logger.Printf("[ERR] yamux: established stream without inflight syn semaphore")
 	}
 	s.streamLock.Unlock()
 }
