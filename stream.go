@@ -91,7 +91,10 @@ START:
 	case streamRemoteClose:
 		fallthrough
 	case streamClosed:
-		if s.recvBuf == nil || s.recvBuf.Len() == 0 {
+		s.recvLock.Lock()
+		noData := (s.recvBuf == nil || s.recvBuf.Len() == 0)
+		s.recvLock.Unlock()
+		if noData {
 			s.stateLock.Unlock()
 			return 0, io.EOF
 		}
