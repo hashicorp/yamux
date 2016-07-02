@@ -91,10 +91,13 @@ START:
 	case streamRemoteClose:
 		fallthrough
 	case streamClosed:
+		s.recvLock.Lock()
 		if s.recvBuf == nil || s.recvBuf.Len() == 0 {
+			s.recvLock.Unlock()
 			s.stateLock.Unlock()
 			return 0, io.EOF
 		}
+		s.recvLock.Unlock()
 	case streamReset:
 		s.stateLock.Unlock()
 		return 0, ErrConnectionReset
