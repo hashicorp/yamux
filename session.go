@@ -288,7 +288,7 @@ func (s *Session) Ping() (time.Duration, error) {
 		delete(s.pings, id) // Ignore it if a response comes later.
 		s.pingLock.Unlock()
 		// Double check the needPing flag when timeout
-		if needPing := atomic.LoadInt32(&s.needPing); needPing == 0 {
+		if atomic.LoadInt32(&s.needPing) == 0 {
 			return 0, ErrTimeout
 		}
 	case <-s.shutdownCh:
@@ -305,13 +305,15 @@ func (s *Session) keepalive() {
 	for {
 		select {
 		case <-time.After(s.config.KeepAliveInterval):
-			if needPing := atomic.LoadInt32(&s.needPing); needPing == 0 {
+			if atomic.LoadInt32(&s.needPing) == 0 {
 				_, err := s.Ping()
 				if err != nil {
 					s.logger.Printf("[ERR] yamux: keepalive failed: %v", err)
 					s.exitErr(ErrKeepAliveTimeout)
 					return
 				}
+			} else {
+				atomic.StoreInt32(&s.needPing, 0)
 			}
 		case <-s.shutdownCh:
 			return
