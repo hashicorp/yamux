@@ -305,15 +305,13 @@ func (s *Session) keepalive() {
 	for {
 		select {
 		case <-time.After(s.config.KeepAliveInterval):
-			if atomic.LoadInt32(&s.needPing) == 0 {
+			if !atomic.CompareAndSwapInt32(&s.needPing, 1, 0) {
 				_, err := s.Ping()
 				if err != nil {
 					s.logger.Printf("[ERR] yamux: keepalive failed: %v", err)
 					s.exitErr(ErrKeepAliveTimeout)
 					return
 				}
-			} else {
-				atomic.StoreInt32(&s.needPing, 0)
 			}
 		case <-s.shutdownCh:
 			return
