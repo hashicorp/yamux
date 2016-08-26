@@ -82,6 +82,7 @@ func (s *Stream) StreamID() uint32 {
 
 // Read is used to read from the stream
 func (s *Stream) Read(b []byte) (n int, err error) {
+	var bufsiz int
 	defer asyncNotify(s.recvNotifyCh)
 START:
 	s.stateLock.Lock()
@@ -113,10 +114,13 @@ START:
 
 	// Read any bytes
 	n, _ = s.recvBuf.Read(b)
+	bufsiz = s.recvBuf.Len()
 	s.recvLock.Unlock()
 
 	// Send a window update potentially
-	err = s.sendWindowUpdate()
+	if uint32(bufsiz)+atomic.LoadUint32(&s.recvWindow) < s.session.config.MaxStreamWindowSize {
+		err = s.sendWindowUpdate()
+	}
 	return n, err
 
 WAIT:
