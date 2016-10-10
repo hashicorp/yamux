@@ -51,6 +51,26 @@ func (p *pipeConn) Close() error {
 	return p.writer.Close()
 }
 
+type delayedConn struct {
+	conn       io.ReadWriteCloser
+	writeDelay time.Duration
+}
+
+func (c *delayedConn) Read(b []byte) (int, error) {
+	return c.conn.Read(b)
+}
+
+func (c *delayedConn) Write(b []byte) (int, error) {
+	if c.writeDelay != 0 {
+		time.Sleep(c.writeDelay)
+	}
+	return c.conn.Write(b)
+}
+
+func (c *delayedConn) Close() error {
+	return c.conn.Close()
+}
+
 func testConn() (io.ReadWriteCloser, io.ReadWriteCloser) {
 	read1, write1 := io.Pipe()
 	read2, write2 := io.Pipe()
@@ -86,6 +106,8 @@ func testClientServerConfig(conf *Config) (*Session, *Session) {
 
 func TestPing(t *testing.T) {
 	client, server := testClientServer()
+	client.conn = &delayedConn{conn: client.conn, writeDelay: 10 * time.Millisecond}
+	server.conn = &delayedConn{conn: server.conn, writeDelay: 10 * time.Millisecond}
 	defer client.Close()
 	defer server.Close()
 
