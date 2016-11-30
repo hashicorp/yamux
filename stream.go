@@ -209,6 +209,8 @@ WAIT:
 		goto START
 	case <-timeout:
 		return 0, ErrTimeout
+	case <-s.session.shutdownCh:
+		return 0, ErrSessionShutdown
 	}
 	return 0, nil
 }
