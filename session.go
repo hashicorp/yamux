@@ -198,12 +198,28 @@ func (s *Session) Accept() (net.Conn, error) {
 // AcceptStream is used to block until the next available stream
 // is ready to be accepted.
 func (s *Session) AcceptStream() (*Stream, error) {
+	return s.AcceptStreamWithTimeout(0)
+}
+
+// AcceptStream is used to block until the next available stream
+// is ready to be accepted within a given time frame.
+func (s *Session) AcceptStreamWithTimeout(t time.Duration) (*Stream, error) {
+	var timeout <-chan time.Time
+	if t > 0 {
+		timer := time.NewTimer(t)
+		defer timer.Stop()
+
+		timeout = timer.C
+	}
+
 	select {
 	case stream := <-s.acceptCh:
 		if err := stream.sendWindowUpdate(); err != nil {
 			return nil, err
 		}
 		return stream, nil
+	case <-timeout:
+		return nil, ErrTimeout
 	case <-s.shutdownCh:
 		return nil, s.shutdownErr
 	}
