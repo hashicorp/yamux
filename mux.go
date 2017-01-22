@@ -32,6 +32,9 @@ type Config struct {
 
 	// LogOutput is used to control the log destination
 	LogOutput io.Writer
+
+	// Called when a keepalive fails and the connection is terminated
+	OnKeepAliveFail func()
 }
 
 // DefaultConfig is used to return a default configuration

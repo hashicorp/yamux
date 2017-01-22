@@ -304,6 +304,7 @@ func (s *Session) keepalive() {
 			_, err := s.Ping()
 			if err != nil {
 				s.logger.Printf("[ERR] yamux: keepalive failed: %v", err)
+				s.config.OnKeepAliveFail()
 				s.exitErr(ErrKeepAliveTimeout)
 				return
 			}
