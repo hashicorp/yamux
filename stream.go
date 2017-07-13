@@ -273,6 +273,20 @@ func (s *Stream) sendClose() error {
 	return nil
 }
 
+func (s *Stream) Reset() error {
+	s.stateLock.Lock()
+	s.state = streamReset
+	s.stateLock.Unlock()
+
+	s.controlHdrLock.Lock()
+	defer s.controlHdrLock.Unlock()
+
+	s.session.closeStream(s.id)
+
+	s.controlHdr.encode(typeWindowUpdate, flagRST, s.id, 0)
+	return s.session.waitForSendErr(s.controlHdr, nil, s.controlErr)
+}
+
 // Close is used to close the stream
 func (s *Stream) Close() error {
 	closeStream := false

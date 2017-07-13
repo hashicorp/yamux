@@ -1192,3 +1192,33 @@ func TestSession_ConnectionWriteTimeout(t *testing.T) {
 
 	wg.Wait()
 }
+
+func TestStreamResetWrite(t *testing.T) {
+	client, server := testClientServer()
+	defer client.Close()
+	defer server.Close()
+
+	wait := make(chan struct{})
+	go func() {
+		defer close(wait)
+		stream, err := server.AcceptStream()
+		if err != nil {
+			t.Errorf("err: %v", err)
+		}
+
+		time.Sleep(time.Millisecond * 50)
+
+		_, err = stream.Write([]byte("foo"))
+		if err == nil {
+			t.Errorf("should have failed to write")
+		}
+	}()
+
+	stream, err := client.OpenStream()
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+
+	stream.Reset()
+	<-wait
+}
