@@ -1,7 +1,6 @@
 package yamux
 
 import (
-	"fmt"
 	"testing"
 )
 
@@ -85,7 +84,6 @@ func BenchmarkSendRecvLarge(b *testing.B) {
 	client, server := testClientServer()
 	defer client.Close()
 	defer server.Close()
-
 	const sendSize = 512 * 1024 * 1024
 	const recvSize = 4 * 1024
 
@@ -107,9 +105,6 @@ func BenchmarkSendRecvLarge(b *testing.B) {
 					b.Fatalf("err: %v", err)
 				}
 			}
-
-			fmt.Printf("Capacity of rcv buffer = %v, length of rcv window = %v\n", stream.recvBuf.Cap(), stream.recvWindow)
-
 		}
 		close(recvDone)
 	}()
