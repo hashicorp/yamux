@@ -76,6 +76,10 @@ const (
 	// GoAway is sent to terminate a session. The StreamID
 	// should be 0 and the length is an error code.
 	typeGoAway
+
+	// typeMax defines the upper bound of valid message types
+	// and should always be the last constant.
+	typeMax
 )
 
 const (
