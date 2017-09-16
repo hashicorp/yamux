@@ -1262,3 +1262,42 @@ func TestStreamHalfClose2(t *testing.T) {
 	}
 	<-wait
 }
+
+func TestStreamResetRead(t *testing.T) {
+	client, server := testClientServer()
+	defer client.Close()
+	defer server.Close()
+
+	wc := new(sync.WaitGroup)
+	wc.Add(2)
+	go func() {
+		defer wc.Done()
+		stream, err := server.AcceptStream()
+		if err != nil {
+			t.Error(err)
+		}
+
+		_, err = ioutil.ReadAll(stream)
+		if err == nil {
+			t.Errorf("expected reset")
+		}
+	}()
+
+	stream, err := client.OpenStream()
+	if err != nil {
+		t.Error(err)
+	}
+
+	go func() {
+		defer wc.Done()
+
+		_, err := ioutil.ReadAll(stream)
+		if err == nil {
+			t.Errorf("expected reset")
+		}
+	}()
+
+	time.Sleep(1 * time.Second)
+	stream.Reset()
+	wc.Wait()
+}
