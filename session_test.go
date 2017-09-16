@@ -1222,3 +1222,43 @@ func TestStreamResetWrite(t *testing.T) {
 	stream.Reset()
 	<-wait
 }
+
+// Because reads should succeed after closing the stream.
+func TestStreamHalfClose2(t *testing.T) {
+	client, server := testClientServer()
+	defer client.Close()
+	defer server.Close()
+
+	wait := make(chan struct{})
+
+	go func() {
+		stream, err := server.AcceptStream()
+		if err != nil {
+			t.Error(err)
+		}
+		<-wait
+		_, err = stream.Write([]byte("asdf"))
+		if err != nil {
+			t.Error(err)
+		}
+		stream.Close()
+		wait <- struct{}{}
+	}()
+
+	stream, err := client.OpenStream()
+	if err != nil {
+		t.Error(err)
+	}
+
+	stream.Close()
+	wait <- struct{}{}
+
+	buf, err := ioutil.ReadAll(stream)
+	if err != nil {
+		t.Error(err)
+	}
+	if !bytes.Equal(buf, []byte("asdf")) {
+		t.Fatalf("didn't get expected data")
+	}
+	<-wait
+}

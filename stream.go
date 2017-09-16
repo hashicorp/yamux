@@ -86,8 +86,6 @@ func (s *Stream) Read(b []byte) (n int, err error) {
 START:
 	s.stateLock.Lock()
 	switch s.state {
-	case streamLocalClose:
-		fallthrough
 	case streamRemoteClose:
 		fallthrough
 	case streamClosed:
