@@ -265,24 +265,38 @@ func (s *Stream) sendClose() error {
 	flags := s.sendFlags()
 	flags |= flagFIN
 	s.controlHdr.encode(typeWindowUpdate, flags, s.id, 0)
-	if err := s.session.waitForSendErr(s.controlHdr, nil, s.controlErr); err != nil {
-		return err
-	}
-	return nil
+	return s.session.waitForSendErr(s.controlHdr, nil, s.controlErr)
 }
 
-func (s *Stream) Reset() error {
-	s.stateLock.Lock()
-	s.state = streamReset
-	s.stateLock.Unlock()
-
+// sendReset is used to send a RST
+func (s *Stream) sendReset() error {
 	s.controlHdrLock.Lock()
 	defer s.controlHdrLock.Unlock()
 
-	s.session.closeStream(s.id)
-
 	s.controlHdr.encode(typeWindowUpdate, flagRST, s.id, 0)
 	return s.session.waitForSendErr(s.controlHdr, nil, s.controlErr)
+}
+
+// Reset resets the stream (forcibly closes the stream)
+func (s *Stream) Reset() error {
+	s.stateLock.Lock()
+	switch s.state {
+	case streamClosed, streamReset:
+		s.stateLock.Unlock()
+		return nil
+	case streamSYNSent, streamSYNReceived, streamEstablished:
+	case streamLocalClose, streamRemoteClose:
+	default:
+		panic("unhandled state")
+	}
+	s.state = streamReset
+	s.stateLock.Unlock()
+
+	err := s.sendReset()
+	s.notifyWaiting()
+	s.session.closeStream(s.id)
+
+	return err
 }
 
 // Close is used to close the stream
@@ -314,12 +328,12 @@ func (s *Stream) Close() error {
 	return nil
 SEND_CLOSE:
 	s.stateLock.Unlock()
-	s.sendClose()
+	err := s.sendClose()
 	s.notifyWaiting()
 	if closeStream {
 		s.session.closeStream(s.id)
 	}
-	return nil
+	return err
 }
 
 // forceClose is used for when the session is exiting
