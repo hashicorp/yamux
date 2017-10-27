@@ -696,6 +696,20 @@ func TestReadDeadline(t *testing.T) {
 	if _, err := stream.Read(buf); err != ErrTimeout {
 		t.Fatalf("err: %v", err)
 	}
+
+	// reset to no dead line
+	if err := stream.SetReadDeadline(time.Time{}); err != nil {
+		t.Fatalf("err: %v", err)
+	}
+
+	go func() {
+		time.Sleep(5 * time.Microsecond)
+		stream.SetReadDeadline(time.Unix(1, 0)) // net.aLongTimeAgo
+	}()
+
+	if _, err := stream.Read(buf); err != ErrTimeout {
+		t.Fatalf("err: %v", err)
+	}
 }
 
 func TestWriteDeadline(t *testing.T) {
@@ -720,15 +734,43 @@ func TestWriteDeadline(t *testing.T) {
 	}
 
 	buf := make([]byte, 512)
+	ok := false
 	for i := 0; i < int(initialStreamWindow); i++ {
 		_, err := stream.Write(buf)
 		if err != nil && err == ErrTimeout {
-			return
+			ok = true
+			break
 		} else if err != nil {
 			t.Fatalf("err: %v", err)
 		}
 	}
-	t.Fatalf("Expected timeout")
+	if !ok {
+		t.Fatalf("Expected timeout")
+	}
+
+	// reset to no dead line
+	if err := stream.SetWriteDeadline(time.Time{}); err != nil {
+		t.Fatalf("err: %v", err)
+	}
+
+	go func() {
+		time.Sleep(5 * time.Microsecond)
+		stream.SetWriteDeadline(time.Unix(1, 0)) // net.aLongTimeAgo
+	}()
+
+	ok = false
+	for i := 0; i < int(initialStreamWindow); i++ {
+		_, err := stream.Write(buf)
+		if err != nil && err == ErrTimeout {
+			ok = true
+			break
+		} else if err != nil {
+			t.Fatalf("err: %v", err)
+		}
+	}
+	if !ok {
+		t.Fatalf("Expected timeout")
+	}
 }
 
 func TestBacklogExceeded(t *testing.T) {
