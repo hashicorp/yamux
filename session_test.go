@@ -980,6 +980,48 @@ func TestBacklogExceeded_Accept(t *testing.T) {
 	}
 }
 
+func TestSessionOpenStream_WindowUpdateSYNTimeout(t *testing.T) {
+	client, server := testClientServerConfig(testConfNoKeepAlive())
+	defer client.Close()
+	defer server.Close()
+
+	// Prevent the client from initially writing SYN
+	clientConn := client.conn.(*pipeConn)
+	clientConn.writeBlocker.Lock()
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+
+	// server
+	go func() {
+		defer wg.Done()
+
+		stream, err := server.Accept()
+		if err != nil {
+			t.Fatalf("err: %v", err)
+		}
+		stream.Close()
+	}()
+
+	stream, err := client.OpenStream()
+	if err == nil {
+		t.Fatal("expected err: connection write timeout")
+	}
+
+	// release lock
+	clientConn.writeBlocker.Unlock()
+
+	if stream != nil {
+		t.Fatal("expected stream to be nil")
+	}
+
+	wg.Wait()
+
+	if exp, got := 0, len(client.streams); got != exp {
+		t.Errorf("invalid streams length; exp=%d, got=%d", exp, got)
+	}
+}
+
 func TestSession_WindowUpdateWriteDuringRead(t *testing.T) {
 	client, server := testClientServerConfig(testConfNoKeepAlive())
 	defer client.Close()
