@@ -49,6 +49,7 @@ type Stream struct {
 
 	readDeadline  time.Time
 	writeDeadline time.Time
+	deadlineLock  sync.Mutex
 }
 
 // newStream is used to construct a new stream within
@@ -122,11 +123,13 @@ START:
 WAIT:
 	var timeout <-chan time.Time
 	var timer *time.Timer
+	s.deadlineLock.Lock()
 	if !s.readDeadline.IsZero() {
 		delay := s.readDeadline.Sub(time.Now())
 		timer = time.NewTimer(delay)
 		timeout = timer.C
 	}
+	s.deadlineLock.Unlock()
 	select {
 	case <-s.recvNotifyCh:
 		if timer != nil {
@@ -200,10 +203,12 @@ START:
 
 WAIT:
 	var timeout <-chan time.Time
+	s.deadlineLock.Lock()
 	if !s.writeDeadline.IsZero() {
 		delay := s.writeDeadline.Sub(time.Now())
 		timeout = time.After(delay)
 	}
+	s.deadlineLock.Unlock()
 	select {
 	case <-s.sendNotifyCh:
 		goto START
@@ -435,12 +440,16 @@ func (s *Stream) SetDeadline(t time.Time) error {
 
 // SetReadDeadline sets the deadline for future Read calls.
 func (s *Stream) SetReadDeadline(t time.Time) error {
+	s.deadlineLock.Lock()
+	defer s.deadlineLock.Unlock()
 	s.readDeadline = t
 	return nil
 }
 
 // SetWriteDeadline sets the deadline for future Write calls
 func (s *Stream) SetWriteDeadline(t time.Time) error {
+	s.deadlineLock.Lock()
+	defer s.deadlineLock.Unlock()
 	s.writeDeadline = t
 	return nil
 }
