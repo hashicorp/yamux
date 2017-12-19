@@ -188,7 +188,7 @@ START:
 
 	// Send the header
 	s.sendHdr.encode(typeData, flags, s.id, max)
-	if err := s.session.waitForSendErr(s.sendHdr, body, s.sendErr); err != nil {
+	if err = s.session.waitForSendErr(s.sendHdr, body, s.sendErr); err != nil {
 		return 0, err
 	}
 
