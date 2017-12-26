@@ -939,7 +939,7 @@ func TestSendData_VeryLarge(t *testing.T) {
 	}()
 	select {
 	case <-doneCh:
-	case <-time.After(20 * time.Second):
+	case <-time.After(90 * time.Second):
 		panic("timeout")
 	}
 }
