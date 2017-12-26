@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
-	"log"
-	"reflect"
 	"runtime"
 	"strings"
 	"sync"
@@ -20,14 +18,17 @@ func (l *logCapture) logs() []string {
 	return strings.Split(strings.TrimSpace(l.String()), "\n")
 }
 
-func (l *logCapture) match(expect []string) bool {
-	return reflect.DeepEqual(l.logs(), expect)
-}
-
-func captureLogs(s *Session) *logCapture {
-	buf := new(logCapture)
-	s.logger = log.New(buf, "", 0)
-	return buf
+func (l *logCapture) match(expected []string) bool {
+	logs := l.logs()
+	if len(logs) != len(expected) {
+		return false
+	}
+	for i := range logs {
+		if !strings.HasSuffix(logs[i], expected[i]) {
+			return false
+		}
+	}
+	return true
 }
 
 type pipeConn struct {
@@ -792,14 +793,15 @@ func TestKeepAlive_Timeout(t *testing.T) {
 	clientConf := testConf()
 	clientConf.ConnectionWriteTimeout = time.Hour // We're testing keep alives, not connection writes
 	clientConf.EnableKeepAlive = false            // Just test one direction, so it's deterministic who hangs up on whom
+	clientConf.LogOutput = ioutil.Discard         // Client logs aren't part of the test
 	client, _ := Client(conn1, clientConf)
 	defer client.Close()
 
-	server, _ := Server(conn2, testConf())
+	serverConf := testConf()
+	serverLogs := new(logCapture)
+	serverConf.LogOutput = serverLogs
+	server, _ := Server(conn2, serverConf)
 	defer server.Close()
-
-	_ = captureLogs(client) // Client logs aren't part of the test
-	serverLogs := captureLogs(server)
 
 	errCh := make(chan error, 1)
 	go func() {
