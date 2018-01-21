@@ -339,7 +339,13 @@ SEND_CLOSE:
 // forceClose is used for when the session is exiting
 func (s *Stream) forceClose() {
 	s.stateLock.Lock()
-	s.state = streamClosed
+	switch s.state {
+	case streamClosed:
+		// Already successfully closed. It just hasn't been removed from
+		// the list of streams yet.
+	default:
+		s.state = streamReset
+	}
 	s.stateLock.Unlock()
 	s.notifyWaiting()
 }
