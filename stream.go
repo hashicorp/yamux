@@ -427,7 +427,7 @@ func (s *Stream) readData(hdr header, flags uint16, conn io.Reader) error {
 	}
 
 	// Decrement the receive window
-	s.recvWindow += ^uint32(length - 1)
+	s.recvWindow -= length
 	s.recvLock.Unlock()
 
 	// Unblock any readers
