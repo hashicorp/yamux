@@ -334,6 +334,10 @@ func (s *Session) waitForSendErr(hdr header, body io.Reader, errCh chan error) e
 	timer.Reset(s.config.ConnectionWriteTimeout)
 	defer func() {
 		timer.Stop()
+		select {
+		case <-timer.C:
+		default:
+		}
 		timerPool.Put(t)
 	}()
 
@@ -365,6 +369,10 @@ func (s *Session) sendNoWait(hdr header) error {
 	timer.Reset(s.config.ConnectionWriteTimeout)
 	defer func() {
 		timer.Stop()
+		select {
+		case <-timer.C:
+		default:
+		}
 		timerPool.Put(t)
 	}()
 
@@ -424,6 +432,7 @@ func (s *Session) recv() {
 	}
 }
 
+// Ensure that the index of the handler (typeData/typeWindowUpdate/etc) matches the message type
 var (
 	handlers = []func(*Session, header) error{
 		typeData:         (*Session).handleStreamMessage,
