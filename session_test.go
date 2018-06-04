@@ -1254,3 +1254,112 @@ func TestSession_ConnectionWriteTimeout(t *testing.T) {
 
 	wg.Wait()
 }
+
+func TestStreamResetWrite(t *testing.T) {
+	client, server := testClientServer()
+	defer client.Close()
+	defer server.Close()
+
+	wait := make(chan struct{})
+	go func() {
+		defer close(wait)
+		stream, err := server.AcceptStream()
+		if err != nil {
+			t.Errorf("err: %v", err)
+		}
+
+		time.Sleep(time.Millisecond * 50)
+
+		_, err = stream.Write([]byte("foo"))
+		if err == nil {
+			t.Errorf("should have failed to write")
+		}
+	}()
+
+	stream, err := client.OpenStream()
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+
+	stream.Reset()
+	<-wait
+}
+
+// Because reads should succeed after closing the stream.
+func TestStreamHalfClose2(t *testing.T) {
+	client, server := testClientServer()
+	defer client.Close()
+	defer server.Close()
+
+	wait := make(chan struct{})
+
+	go func() {
+		stream, err := server.AcceptStream()
+		if err != nil {
+			t.Error(err)
+		}
+		<-wait
+		_, err = stream.Write([]byte("asdf"))
+		if err != nil {
+			t.Error(err)
+		}
+		stream.Close()
+		wait <- struct{}{}
+	}()
+
+	stream, err := client.OpenStream()
+	if err != nil {
+		t.Error(err)
+	}
+
+	stream.Close()
+	wait <- struct{}{}
+
+	buf, err := ioutil.ReadAll(stream)
+	if err != nil {
+		t.Error(err)
+	}
+	if !bytes.Equal(buf, []byte("asdf")) {
+		t.Fatalf("didn't get expected data")
+	}
+	<-wait
+}
+
+func TestStreamResetRead(t *testing.T) {
+	client, server := testClientServer()
+	defer client.Close()
+	defer server.Close()
+
+	wc := new(sync.WaitGroup)
+	wc.Add(2)
+	go func() {
+		defer wc.Done()
+		stream, err := server.AcceptStream()
+		if err != nil {
+			t.Error(err)
+		}
+
+		_, err = ioutil.ReadAll(stream)
+		if err == nil {
+			t.Errorf("expected reset")
+		}
+	}()
+
+	stream, err := client.OpenStream()
+	if err != nil {
+		t.Error(err)
+	}
+
+	go func() {
+		defer wc.Done()
+
+		_, err := ioutil.ReadAll(stream)
+		if err == nil {
+			t.Errorf("expected reset")
+		}
+	}()
+
+	time.Sleep(1 * time.Second)
+	stream.Reset()
+	wc.Wait()
+}
