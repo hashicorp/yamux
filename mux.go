@@ -65,6 +65,8 @@ func VerifyConfig(config *Config) error {
 	}
 	if config.LogOutput != nil && config.Logger != nil {
 		return fmt.Errorf("both Logger and LogOutput may not be set, select one")
+	} else if config.LogOutput == nil && config.Logger == nil {
+		return fmt.Errorf("one of Logger or LogOutput must be set, select one")
 	}
 	return nil
 }
