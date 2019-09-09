@@ -121,7 +121,7 @@ const (
 		sizeOfStreamID + sizeOfLength
 )
 
-const wrongRTT = -1
+const wrongRTT = 0
 
 type header []byte
 

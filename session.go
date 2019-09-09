@@ -76,6 +76,7 @@ type Session struct {
 	shutdownLock sync.Mutex
 
 	// if the connection alive then RTT > 0 , else wrongRTT
+	// the fisrt Ping() return value equal this RTT
 	RTT time.Duration
 }
 
