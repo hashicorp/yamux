@@ -74,6 +74,10 @@ type Session struct {
 	shutdownErr  error
 	shutdownCh   chan struct{}
 	shutdownLock sync.Mutex
+
+	// if the connection alive then RTT > 0 , else wrongRTT
+	// the fisrt Ping() return value equal this RTT
+	RTT time.Duration
 }
 
 // sendReady is used to either mark a stream as ready
@@ -226,6 +230,8 @@ func (s *Session) Close() error {
 	s.shutdownLock.Lock()
 	defer s.shutdownLock.Unlock()
 
+	defer func(){s.RTT = wrongRTT}()
+
 	if s.shutdown {
 		return nil
 	}
@@ -286,6 +292,7 @@ func (s *Session) Ping() (time.Duration, error) {
 	hdr := header(make([]byte, headerSize))
 	hdr.encode(typePing, flagSYN, 0, id)
 	if err := s.waitForSend(hdr, nil); err != nil {
+		s.RTT = wrongRTT
 		return 0, err
 	}
 
@@ -297,13 +304,17 @@ func (s *Session) Ping() (time.Duration, error) {
 		s.pingLock.Lock()
 		delete(s.pings, id) // Ignore it if a response comes later.
 		s.pingLock.Unlock()
+		s.RTT = wrongRTT
 		return 0, ErrTimeout
 	case <-s.shutdownCh:
+		s.RTT = wrongRTT
 		return 0, ErrSessionShutdown
 	}
 
 	// Compute the RTT
-	return time.Now().Sub(start), nil
+	tmpRtt := time.Now().Sub(start)
+	s.RTT = tmpRtt
+	return tmpRtt, nil
 }
 
 // keepalive is a long running goroutine that periodically does
@@ -352,17 +363,22 @@ func (s *Session) waitForSendErr(hdr header, body io.Reader, errCh chan error) e
 	select {
 	case s.sendCh <- ready:
 	case <-s.shutdownCh:
+		s.RTT = wrongRTT
 		return ErrSessionShutdown
 	case <-timer.C:
+		s.RTT = wrongRTT
 		return ErrConnectionWriteTimeout
 	}
 
 	select {
 	case err := <-errCh:
+		//s.RTT = wrongRTT
 		return err
 	case <-s.shutdownCh:
+		s.RTT = wrongRTT
 		return ErrSessionShutdown
 	case <-timer.C:
+		s.RTT = wrongRTT
 		return ErrConnectionWriteTimeout
 	}
 }
@@ -531,7 +547,7 @@ func (s *Session) handleStreamMessage(hdr header) error {
 	return nil
 }
 
-// handlePing is invokde for a typePing frame
+// handlePing is invoked for a typePing frame
 func (s *Session) handlePing(hdr header) error {
 	flags := hdr.Flags()
 	pingID := hdr.Length()

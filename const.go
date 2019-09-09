@@ -121,6 +121,8 @@ const (
 		sizeOfStreamID + sizeOfLength
 )
 
+const wrongRTT = 0
+
 type header []byte
 
 func (h header) Version() uint8 {
