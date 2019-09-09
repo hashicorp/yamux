@@ -75,7 +75,7 @@ type Session struct {
 	shutdownCh   chan struct{}
 	shutdownLock sync.Mutex
 
-	// if the connection alive then RTT > 0 , else -1
+	// if the connection alive then RTT > 0 , else wrongRTT
 	RTT time.Duration
 }
 
@@ -371,7 +371,7 @@ func (s *Session) waitForSendErr(hdr header, body io.Reader, errCh chan error) e
 
 	select {
 	case err := <-errCh:
-		s.RTT = wrongRTT
+		//s.RTT = wrongRTT
 		return err
 	case <-s.shutdownCh:
 		s.RTT = wrongRTT
