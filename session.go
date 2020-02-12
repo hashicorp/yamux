@@ -151,8 +151,44 @@ func (s *Session) Open() (net.Conn, error) {
 	return conn, nil
 }
 
+// OpenTimeout is used to create a new stream as a net.Conn with TimeOut
+func (s *Session) OpenTimeout(timeout time.Duration) (net.Conn, error) {
+	conn, err := s.OpenStreamTimeout(timeout)
+	if err != nil {
+		return nil, err
+	}
+	return conn, nil
+}
+
 // OpenStream is used to create a new stream
 func (s *Session) OpenStream() (*Stream, error) {
+	return s._openStream(nil, func(stream *Stream) error {
+		return stream.sendWindowUpdate()
+	})
+}
+
+// OpenStreamTimeout is used to create a new stream with TimeOut
+func (s *Session) OpenStreamTimeout(timeout time.Duration) (*Stream, error) {
+	t := timerPool.Get()
+	timer := t.(*time.Timer)
+	timer.Reset(timeout)
+	defer func() {
+		if !timer.Stop() {
+			select {
+			case <-timer.C:
+			default:
+			}
+		}
+		timerPool.Put(t)
+	}()
+
+	return s._openStream(timer.C, func(stream *Stream) error {
+		return stream.sendWindowUpdateTimeout(timer.C)
+	})
+}
+
+// OpenStream is used to create a new stream
+func (s *Session) _openStream(timeout <-chan time.Time, fn func(*Stream) error) (*Stream, error) {
 	if s.IsClosed() {
 		return nil, ErrSessionShutdown
 	}
@@ -165,6 +201,9 @@ func (s *Session) OpenStream() (*Stream, error) {
 	case s.synCh <- struct{}{}:
 	case <-s.shutdownCh:
 		return nil, ErrSessionShutdown
+	case <-timeout:
+		s.logger.Printf("[ERR] yamux: Failed to openstream due %v", ErrTimeout)
+		return nil, ErrTimeout
 	}
 
 GET_ID:
@@ -185,7 +224,12 @@ GET_ID:
 	s.streamLock.Unlock()
 
 	// Send the window update to create
-	if err := stream.sendWindowUpdate(); err != nil {
+	if err := fn(stream); err != nil {
+		s.logger.Printf("[ERR] yamux: Failed to openstream due %v", err)
+		s.streamLock.Lock()
+		delete(s.streams, id)
+		delete(s.inflight, id)
+		s.streamLock.Unlock()
 		select {
 		case <-s.synCh:
 		default:
@@ -282,10 +326,24 @@ func (s *Session) Ping() (time.Duration, error) {
 	s.pings[id] = ch
 	s.pingLock.Unlock()
 
+	t := timerPool.Get()
+	timer := t.(*time.Timer)
+	timer.Reset(s.config.ConnectionWriteTimeout)
+	defer func() {
+		if !timer.Stop() {
+			select {
+			case <-timer.C:
+			default:
+			}
+		}
+		timerPool.Put(t)
+	}()
+
 	// Send the ping request
 	hdr := header(make([]byte, headerSize))
 	hdr.encode(typePing, flagSYN, 0, id)
-	if err := s.waitForSend(hdr, nil); err != nil {
+	errCh := make(chan error, 1)
+	if err := s.waitForSendErrTimeout(timer.C, hdr, nil, errCh); err != nil {
 		return 0, err
 	}
 
@@ -293,7 +351,7 @@ func (s *Session) Ping() (time.Duration, error) {
 	start := time.Now()
 	select {
 	case <-ch:
-	case <-time.After(s.config.ConnectionWriteTimeout):
+	case <-timer.C:
 		s.pingLock.Lock()
 		delete(s.pings, id) // Ignore it if a response comes later.
 		s.pingLock.Unlock()
@@ -309,16 +367,33 @@ func (s *Session) Ping() (time.Duration, error) {
 // keepalive is a long running goroutine that periodically does
 // a ping to keep the connection alive.
 func (s *Session) keepalive() {
+	t := timerPool.Get()
+	timer := t.(*time.Timer)
+	timer.Reset(s.config.KeepAliveInterval)
+	defer func() {
+		if !timer.Stop() {
+			select {
+			case <-timer.C:
+			default:
+			}
+		}
+		timerPool.Put(t)
+	}()
+
 	for {
 		select {
-		case <-time.After(s.config.KeepAliveInterval):
-			_, err := s.Ping()
+		case <-timer.C:
+			rtt, err := s.Ping()
 			if err != nil {
 				if err != ErrSessionShutdown {
 					s.logger.Printf("[ERR] yamux: keepalive failed: %v", err)
 					s.exitErr(ErrKeepAliveTimeout)
 				}
 				return
+			}
+
+			if rtt >= s.config.KeepAliveInterval {
+				s.logger.Printf("[WARN] yamux: keepalive ping too long: %.01f seconds", rtt.Seconds())
 			}
 		case <-s.shutdownCh:
 			return
@@ -340,20 +415,25 @@ func (s *Session) waitForSendErr(hdr header, body io.Reader, errCh chan error) e
 	timer := t.(*time.Timer)
 	timer.Reset(s.config.ConnectionWriteTimeout)
 	defer func() {
-		timer.Stop()
-		select {
-		case <-timer.C:
-		default:
+		if !timer.Stop() {
+			select {
+			case <-timer.C:
+			default:
+			}
 		}
 		timerPool.Put(t)
 	}()
 
+	return s.waitForSendErrTimeout(timer.C, hdr, body, errCh)
+}
+
+func (s *Session) waitForSendErrTimeout(timeout <-chan time.Time, hdr header, body io.Reader, errCh chan error) error {
 	ready := sendReady{Hdr: hdr, Body: body, Err: errCh}
 	select {
 	case s.sendCh <- ready:
 	case <-s.shutdownCh:
 		return ErrSessionShutdown
-	case <-timer.C:
+	case <-timeout:
 		return ErrConnectionWriteTimeout
 	}
 
@@ -362,7 +442,7 @@ func (s *Session) waitForSendErr(hdr header, body io.Reader, errCh chan error) e
 		return err
 	case <-s.shutdownCh:
 		return ErrSessionShutdown
-	case <-timer.C:
+	case <-timeout:
 		return ErrConnectionWriteTimeout
 	}
 }
@@ -624,7 +704,9 @@ func (s *Session) incomingStream(id uint32) error {
 // was not yet established, then this will give the credit back.
 func (s *Session) closeStream(id uint32) {
 	s.streamLock.Lock()
+	defer s.streamLock.Unlock()
 	if _, ok := s.inflight[id]; ok {
+		delete(s.inflight, id)
 		select {
 		case <-s.synCh:
 		default:
@@ -632,7 +714,6 @@ func (s *Session) closeStream(id uint32) {
 		}
 	}
 	delete(s.streams, id)
-	s.streamLock.Unlock()
 }
 
 // establishStream is used to mark a stream that was in the

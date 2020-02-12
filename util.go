@@ -9,7 +9,12 @@ var (
 	timerPool = &sync.Pool{
 		New: func() interface{} {
 			timer := time.NewTimer(time.Hour * 1e6)
-			timer.Stop()
+			if !timer.Stop() {
+				select {
+					case <-timer.C:
+					default:
+				}
+			}
 			return timer
 		},
 	}

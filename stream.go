@@ -237,6 +237,16 @@ func (s *Stream) sendFlags() uint16 {
 // sendWindowUpdate potentially sends a window update enabling
 // further writes to take place. Must be invoked with the lock.
 func (s *Stream) sendWindowUpdate() error {
+	return s._sendWindowUpdate(s.session.waitForSendErr)
+}
+
+func (s *Stream) sendWindowUpdateTimeout(timeout <-chan time.Time) error {
+	return s._sendWindowUpdate(func(hdr header, body io.Reader, errCh chan error) error {
+		return s.session.waitForSendErrTimeout(timeout, hdr, body, errCh)
+	})
+}
+
+func (s *Stream) _sendWindowUpdate(fn func(hdr header, body io.Reader, errCh chan error) error) error {
 	s.controlHdrLock.Lock()
 	defer s.controlHdrLock.Unlock()
 
@@ -264,7 +274,7 @@ func (s *Stream) sendWindowUpdate() error {
 
 	// Send the header
 	s.controlHdr.encode(typeWindowUpdate, flags, s.id, delta)
-	if err := s.session.waitForSendErr(s.controlHdr, nil, s.controlErr); err != nil {
+	if err := fn(s.controlHdr, nil, s.controlErr); err != nil {
 		return err
 	}
 	return nil
