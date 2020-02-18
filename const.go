@@ -32,6 +32,9 @@ var (
 	// ErrTimeout is used when we reach an IO deadline
 	ErrTimeout = fmt.Errorf("i/o deadline reached")
 
+	// ErrTimeout is used when we reach an IO deadline
+	ErrCallCanceled = fmt.Errorf("i/o was canceled")
+
 	// ErrStreamClosed is returned when using a closed stream
 	ErrStreamClosed = fmt.Errorf("stream closed")
 

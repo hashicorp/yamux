@@ -70,7 +70,6 @@ type Session struct {
 	recvDoneCh chan struct{}
 
 	// shutdown is used to safely close a session
-	shutdown     bool
 	shutdownErr  error
 	shutdownCh   chan struct{}
 	shutdownLock sync.Mutex
@@ -267,43 +266,42 @@ func (s *Session) AcceptStream() (*Stream, error) {
 // Close is used to close the session and all streams.
 // Attempts to send a GoAway before closing the connection.
 func (s *Session) Close() error {
+	return s.close(nil)
+}
+
+func (s *Session) close(err error) error {
 	s.shutdownLock.Lock()
 	defer s.shutdownLock.Unlock()
 
-	if s.shutdown {
+	if s.IsClosed() {
 		return nil
 	}
-	s.shutdown = true
-	if s.shutdownErr == nil {
+	if err != nil {
+		s.shutdownErr = err
+	} else if s.shutdownErr == nil {
 		s.shutdownErr = ErrSessionShutdown
 	}
 	close(s.shutdownCh)
 	s.conn.Close()
-	<-s.recvDoneCh
 
-	s.streamLock.Lock()
-	defer s.streamLock.Unlock()
-	for _, stream := range s.streams {
-		stream.forceClose()
-	}
+	go func() {
+		<-s.recvDoneCh
+
+		s.streamLock.Lock()
+		defer s.streamLock.Unlock()
+		for _, stream := range s.streams {
+			stream.forceClose()
+		}
+	}()
+
 	return nil
-}
-
-// exitErr is used to handle an error that is causing the
-// session to terminate.
-func (s *Session) exitErr(err error) {
-	s.shutdownLock.Lock()
-	if s.shutdownErr == nil {
-		s.shutdownErr = err
-	}
-	s.shutdownLock.Unlock()
-	s.Close()
 }
 
 // GoAway can be used to prevent accepting further
 // connections. It does not close the underlying conn.
 func (s *Session) GoAway() error {
-	return s.waitForSend(s.goAway(goAwayNormal), nil)
+	errCh := make(chan error, 1)
+	return s.waitForSendErr(nil, s.goAway(goAwayNormal), nil, errCh)
 }
 
 // goAway is used to send a goAway message
@@ -343,7 +341,7 @@ func (s *Session) Ping() (time.Duration, error) {
 	hdr := header(make([]byte, headerSize))
 	hdr.encode(typePing, flagSYN, 0, id)
 	errCh := make(chan error, 1)
-	if err := s.waitForSendErrTimeout(timer.C, hdr, nil, errCh); err != nil {
+	if err := s.waitForSendErrTimeout(nil, timer.C, hdr, nil, errCh); err != nil {
 		return 0, err
 	}
 
@@ -387,7 +385,7 @@ func (s *Session) keepalive() {
 			if err != nil {
 				if err != ErrSessionShutdown {
 					s.logger.Printf("[ERR] yamux: keepalive failed: %v", err)
-					s.exitErr(ErrKeepAliveTimeout)
+					s.close(ErrKeepAliveTimeout)
 				}
 				return
 			}
@@ -401,16 +399,10 @@ func (s *Session) keepalive() {
 	}
 }
 
-// waitForSendErr waits to send a header, checking for a potential shutdown
-func (s *Session) waitForSend(hdr header, body io.Reader) error {
-	errCh := make(chan error, 1)
-	return s.waitForSendErr(hdr, body, errCh)
-}
-
 // waitForSendErr waits to send a header with optional data, checking for a
 // potential shutdown. Since there's the expectation that sends can happen
 // in a timely manner, we enforce the connection write timeout here.
-func (s *Session) waitForSendErr(hdr header, body io.Reader, errCh chan error) error {
+func (s *Session) waitForSendErr(cancel <-chan struct{}, hdr header, body io.Reader, errCh chan error) error {
 	t := timerPool.Get()
 	timer := t.(*time.Timer)
 	timer.Reset(s.config.ConnectionWriteTimeout)
@@ -424,15 +416,17 @@ func (s *Session) waitForSendErr(hdr header, body io.Reader, errCh chan error) e
 		timerPool.Put(t)
 	}()
 
-	return s.waitForSendErrTimeout(timer.C, hdr, body, errCh)
+	return s.waitForSendErrTimeout(cancel, timer.C, hdr, body, errCh)
 }
 
-func (s *Session) waitForSendErrTimeout(timeout <-chan time.Time, hdr header, body io.Reader, errCh chan error) error {
+func (s *Session) waitForSendErrTimeout(cancel <-chan struct{}, timeout <-chan time.Time, hdr header, body io.Reader, errCh chan error) error {
 	ready := sendReady{Hdr: hdr, Body: body, Err: errCh}
 	select {
 	case s.sendCh <- ready:
 	case <-s.shutdownCh:
 		return ErrSessionShutdown
+	case <-cancel:
+		return ErrCallCanceled
 	case <-timeout:
 		return ErrConnectionWriteTimeout
 	}
@@ -442,6 +436,8 @@ func (s *Session) waitForSendErrTimeout(timeout <-chan time.Time, hdr header, bo
 		return err
 	case <-s.shutdownCh:
 		return ErrSessionShutdown
+	case <-cancel:
+		return ErrCallCanceled
 	case <-timeout:
 		return ErrConnectionWriteTimeout
 	}
@@ -475,6 +471,12 @@ func (s *Session) sendNoWait(hdr header) error {
 
 // send is a long running goroutine that sends data
 func (s *Session) send() {
+	if err := s.sendLoop(); err != nil {
+		s.close(err)
+	}
+}
+
+func (s *Session) sendLoop() error {
 	for {
 		select {
 		case ready := <-s.sendCh:
@@ -486,8 +488,7 @@ func (s *Session) send() {
 					if err != nil {
 						s.logger.Printf("[ERR] yamux: Failed to write header: %v", err)
 						asyncSendErr(ready.Err, err)
-						s.exitErr(err)
-						return
+						return err
 					}
 					sent += n
 				}
@@ -499,15 +500,14 @@ func (s *Session) send() {
 				if err != nil {
 					s.logger.Printf("[ERR] yamux: Failed to write body: %v", err)
 					asyncSendErr(ready.Err, err)
-					s.exitErr(err)
-					return
+					return err
 				}
 			}
 
 			// No error, successful send
 			asyncSendErr(ready.Err, nil)
 		case <-s.shutdownCh:
-			return
+			return nil
 		}
 	}
 }
@@ -515,7 +515,7 @@ func (s *Session) send() {
 // recv is a long running goroutine that accepts new data
 func (s *Session) recv() {
 	if err := s.recvLoop(); err != nil {
-		s.exitErr(err)
+		s.close(err)
 	}
 }
 
@@ -582,7 +582,7 @@ func (s *Session) handleStreamMessage(hdr header) error {
 			s.logger.Printf("[WARN] yamux: Discarding data for stream: %d", id)
 			if _, err := io.CopyN(ioutil.Discard, s.bufRead, int64(hdr.Length())); err != nil {
 				s.logger.Printf("[ERR] yamux: Failed to discard data: %v", err)
-				return nil
+				return err
 			}
 		} else {
 			s.logger.Printf("[WARN] yamux: frame for missing stream: %v", hdr)
@@ -720,6 +720,7 @@ func (s *Session) closeStream(id uint32) {
 // SYN Sent state as established.
 func (s *Session) establishStream(id uint32) {
 	s.streamLock.Lock()
+	defer s.streamLock.Unlock()
 	if _, ok := s.inflight[id]; ok {
 		delete(s.inflight, id)
 	} else {
@@ -730,5 +731,4 @@ func (s *Session) establishStream(id uint32) {
 	default:
 		s.logger.Printf("[ERR] yamux: established stream without inflight SYN (didn't have semaphore)")
 	}
-	s.streamLock.Unlock()
 }
