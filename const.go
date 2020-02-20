@@ -124,34 +124,34 @@ const (
 		sizeOfStreamID + sizeOfLength
 )
 
-type header []byte
+type header [headerSize]byte
 
-func (h header) Version() uint8 {
+func (h *header) Version() uint8 {
 	return h[0]
 }
 
-func (h header) MsgType() uint8 {
+func (h *header) MsgType() uint8 {
 	return h[1]
 }
 
-func (h header) Flags() uint16 {
+func (h *header) Flags() uint16 {
 	return binary.BigEndian.Uint16(h[2:4])
 }
 
-func (h header) StreamID() uint32 {
+func (h *header) StreamID() uint32 {
 	return binary.BigEndian.Uint32(h[4:8])
 }
 
-func (h header) Length() uint32 {
+func (h *header) Length() uint32 {
 	return binary.BigEndian.Uint32(h[8:12])
 }
 
-func (h header) String() string {
+func (h *header) String() string {
 	return fmt.Sprintf("Vsn:%d Type:%d Flags:%d StreamID:%d Length:%d",
 		h.Version(), h.MsgType(), h.Flags(), h.StreamID(), h.Length())
 }
 
-func (h header) encode(msgType uint8, flags uint16, streamID uint32, length uint32) {
+func (h *header) encode(msgType uint8, flags uint16, streamID uint32, length uint32) {
 	h[0] = protoVersion
 	h[1] = msgType
 	binary.BigEndian.PutUint16(h[2:4], flags)

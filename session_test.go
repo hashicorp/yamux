@@ -1120,10 +1120,10 @@ func TestSession_sendNoWait_Timeout(t *testing.T) {
 		conn := client.conn.(*pipeConn)
 		conn.writeBlocker.Lock()
 
-		hdr := header(make([]byte, headerSize))
-		hdr.encode(typePing, flagACK, 0, 0)
+		var ready sendReady
+		ready.Hdr.encode(typePing, flagACK, 0, 0)
 		for {
-			err = client.sendNoWait(hdr)
+			err = client.sendNoWait(&ready)
 			if err == nil {
 				continue
 			} else if err == ErrConnectionWriteTimeout {
@@ -1164,9 +1164,9 @@ func TestSession_PingOfDeath(t *testing.T) {
 
 		conn.writeBlocker.Lock()
 		for {
-			hdr := header(make([]byte, headerSize))
-			hdr.encode(typePing, 0, 0, 0)
-			err = server.sendNoWait(hdr)
+			var ready sendReady
+			ready.Hdr.encode(typePing, 0, 0, 0)
+			err = server.sendNoWait(&ready)
 			if err == nil {
 				continue
 			} else if err == ErrConnectionWriteTimeout {
