@@ -368,24 +368,16 @@ func (s *Session) Ping() (time.Duration, error) {
 // keepalive is a long running goroutine that periodically does
 // a ping to keep the connection alive.
 func (s *Session) keepalive() {
-	t := timerPool.Get()
-	timer := t.(*time.Timer)
-	timer.Reset(s.config.KeepAliveInterval)
+	ticker := time.NewTicker(s.config.KeepAliveInterval)
 	defer func() {
-		if !timer.Stop() {
-			select {
-			case <-timer.C:
-			default:
-			}
-		}
-		timerPool.Put(t)
+		ticker.Stop()
 	}()
 
 	lcheckcount := 0
 
 	for {
 		select {
-		case <-timer.C:
+		case <-ticker.C:
 			rtt, err := s.Ping()
 			if err != nil {
 				if err != ErrSessionShutdown {
@@ -398,7 +390,7 @@ func (s *Session) keepalive() {
 			lsynChLen := len(s.synCh)
 			lacceptChLen := len(s.acceptCh)
 
-			if (lsynChLen >= s.config.AcceptBacklog/2) || (lacceptChLen >= s.config.AcceptBacklog/2) {
+			if (lsynChLen >= s.config.AcceptBacklog) || (lacceptChLen >= s.config.AcceptBacklog) {
 				lcheckcount++
 			} else {
 				lcheckcount = 0
