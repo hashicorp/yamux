@@ -2,6 +2,7 @@ package yamux
 
 import (
 	"bytes"
+	"context"
 	"io"
 	"sync"
 	"sync/atomic"
@@ -36,19 +37,16 @@ type Stream struct {
 	recvBuf  *bytes.Buffer
 	recvLock sync.Mutex
 
-	controlHdr     header
-	controlErr     chan error
-	controlHdrLock sync.Mutex
-
-	sendHdr  header
-	sendErr  chan error
-	sendLock sync.Mutex
+	controlErr chan error
+	sendErr    chan error
+	sendLock   sync.Mutex
 
 	recvNotifyCh chan struct{}
 	sendNotifyCh chan struct{}
 
-	readDeadline  atomic.Value // time.Time
-	writeDeadline atomic.Value // time.Time
+	readDeadline   atomic.Value // time.Time
+	writeDeadline  atomic.Value // time.Time
+	cancelDeadline atomic.Value
 }
 
 // newStream is used to construct a new stream within
@@ -58,9 +56,7 @@ func newStream(session *Session, id uint32, state streamState) *Stream {
 		id:           id,
 		session:      session,
 		state:        state,
-		controlHdr:   header(make([]byte, headerSize)),
 		controlErr:   make(chan error, 1),
-		sendHdr:      header(make([]byte, headerSize)),
 		sendErr:      make(chan error, 1),
 		recvWindow:   initialStreamWindow,
 		sendWindow:   initialStreamWindow,
@@ -84,7 +80,15 @@ func (s *Stream) StreamID() uint32 {
 
 // Read is used to read from the stream
 func (s *Stream) Read(b []byte) (n int, err error) {
-	defer asyncNotify(s.recvNotifyCh)
+	var cancel <-chan struct{}
+	cancelval := s.cancelDeadline.Load()
+	if cancelval != nil {
+		cancel = cancelval.(<-chan struct{})
+	}
+	return s.read(cancel, b)
+}
+
+func (s *Stream) read(cancel <-chan struct{}, b []byte) (n int, err error) {
 START:
 	s.stateLock.Lock()
 	switch s.state {
@@ -99,7 +103,11 @@ START:
 			s.stateLock.Unlock()
 			return 0, io.EOF
 		}
+		n, _ = s.recvBuf.Read(b)
 		s.recvLock.Unlock()
+
+		s.stateLock.Unlock()
+		return n, nil
 	case streamReset:
 		s.stateLock.Unlock()
 		return 0, ErrConnectionReset
@@ -136,6 +144,8 @@ WAIT:
 			timer.Stop()
 		}
 		goto START
+	case <-cancel:
+		return 0, ErrCallCanceled
 	case <-timeout:
 		return 0, ErrTimeout
 	}
@@ -146,8 +156,15 @@ func (s *Stream) Write(b []byte) (n int, err error) {
 	s.sendLock.Lock()
 	defer s.sendLock.Unlock()
 	total := 0
+
+	var cancel <-chan struct{}
+	cancelval := s.cancelDeadline.Load()
+	if cancelval != nil {
+		cancel = cancelval.(<-chan struct{})
+	}
+
 	for total < len(b) {
-		n, err := s.write(b[total:])
+		n, err := s.write(cancel, b[total:])
 		total += n
 		if err != nil {
 			return total, err
@@ -158,10 +175,24 @@ func (s *Stream) Write(b []byte) (n int, err error) {
 
 // write is used to write to the stream, may return on
 // a short write.
-func (s *Stream) write(b []byte) (n int, err error) {
+func (s *Stream) write(cancel <-chan struct{}, b []byte) (n int, err error) {
 	var flags uint16
 	var max uint32
 	var body io.Reader
+	var ready sendReady
+	t := timerPool.Get()
+	timer := t.(*time.Timer)
+	timer.Reset(s.session.config.ConnectionWriteTimeout)
+	defer func() {
+		if !timer.Stop() {
+			select {
+			case <-timer.C:
+			default:
+			}
+		}
+		timerPool.Put(t)
+	}()
+
 START:
 	s.stateLock.Lock()
 	switch s.state {
@@ -190,8 +221,10 @@ START:
 	body = bytes.NewReader(b[:max])
 
 	// Send the header
-	s.sendHdr.encode(typeData, flags, s.id, max)
-	if err = s.session.waitForSendErr(s.sendHdr, body, s.sendErr); err != nil {
+	ready.Body = body
+	ready.Err = s.sendErr
+	ready.Hdr.encode(typeData, flags, s.id, max)
+	if err = s.session.waitForSendErrTimeout(cancel, timer.C, &ready); err != nil {
 		return 0, err
 	}
 
@@ -211,6 +244,8 @@ WAIT:
 	select {
 	case <-s.sendNotifyCh:
 		goto START
+	case <-cancel:
+		return 0, ErrCallCanceled
 	case <-timeout:
 		return 0, ErrTimeout
 	}
@@ -237,9 +272,23 @@ func (s *Stream) sendFlags() uint16 {
 // sendWindowUpdate potentially sends a window update enabling
 // further writes to take place. Must be invoked with the lock.
 func (s *Stream) sendWindowUpdate() error {
-	s.controlHdrLock.Lock()
-	defer s.controlHdrLock.Unlock()
+	t := timerPool.Get()
+	timer := t.(*time.Timer)
+	timer.Reset(s.session.config.ConnectionWriteTimeout)
+	defer func() {
+		if !timer.Stop() {
+			select {
+			case <-timer.C:
+			default:
+			}
+		}
+		timerPool.Put(t)
+	}()
 
+	return s.sendWindowUpdateTimeout(nil, timer.C)
+}
+
+func (s *Stream) sendWindowUpdateTimeout(cancel <-chan struct{}, timeout <-chan time.Time) error {
 	// Determine the delta update
 	max := s.session.config.MaxStreamWindowSize
 	var bufLen uint32
@@ -263,8 +312,9 @@ func (s *Stream) sendWindowUpdate() error {
 	s.recvLock.Unlock()
 
 	// Send the header
-	s.controlHdr.encode(typeWindowUpdate, flags, s.id, delta)
-	if err := s.session.waitForSendErr(s.controlHdr, nil, s.controlErr); err != nil {
+	ready := sendReady{Body: nil, Err: s.controlErr}
+	ready.Hdr.encode(typeWindowUpdate, flags, s.id, delta)
+	if err := s.session.waitForSendErrTimeout(cancel, timeout, &ready); err != nil {
 		return err
 	}
 	return nil
@@ -272,13 +322,25 @@ func (s *Stream) sendWindowUpdate() error {
 
 // sendClose is used to send a FIN
 func (s *Stream) sendClose() error {
-	s.controlHdrLock.Lock()
-	defer s.controlHdrLock.Unlock()
+	t := timerPool.Get()
+	timer := t.(*time.Timer)
+	timer.Reset(s.session.config.ConnectionWriteTimeout)
+	defer func() {
+		if !timer.Stop() {
+			select {
+			case <-timer.C:
+			default:
+			}
+		}
+		timerPool.Put(t)
+	}()
 
 	flags := s.sendFlags()
 	flags |= flagFIN
-	s.controlHdr.encode(typeWindowUpdate, flags, s.id, 0)
-	if err := s.session.waitForSendErr(s.controlHdr, nil, s.controlErr); err != nil {
+
+	ready := sendReady{Body: nil, Err: s.controlErr}
+	ready.Hdr.encode(typeWindowUpdate, flags, s.id, 0)
+	if err := s.session.waitForSendErrTimeout(nil, timer.C, &ready); err != nil {
 		return err
 	}
 	return nil
@@ -337,6 +399,7 @@ func (s *Stream) processFlags(flags uint16) error {
 	defer func() {
 		if closeStream {
 			s.session.closeStream(s.id)
+			s.notifyWaiting()
 		}
 	}()
 
@@ -360,7 +423,6 @@ func (s *Stream) processFlags(flags uint16) error {
 		case streamLocalClose:
 			s.state = streamClosed
 			closeStream = true
-			s.notifyWaiting()
 		default:
 			s.session.logger.Printf("[ERR] yamux: unexpected FIN flag in state %d", s.state)
 			return ErrUnexpectedFlag
@@ -369,7 +431,6 @@ func (s *Stream) processFlags(flags uint16) error {
 	if flags&flagRST == flagRST {
 		s.state = streamReset
 		closeStream = true
-		s.notifyWaiting()
 	}
 	return nil
 }
@@ -381,37 +442,25 @@ func (s *Stream) notifyWaiting() {
 }
 
 // incrSendWindow updates the size of our send window
-func (s *Stream) incrSendWindow(hdr header, flags uint16) error {
-	if err := s.processFlags(flags); err != nil {
-		return err
-	}
-
+func (s *Stream) incrSetWindow(hdr header) {
 	// Increase window, unblock a sender
 	atomic.AddUint32(&s.sendWindow, hdr.Length())
 	asyncNotify(s.sendNotifyCh)
-	return nil
 }
 
 // readData is used to handle a data frame
-func (s *Stream) readData(hdr header, flags uint16, conn io.Reader) error {
-	if err := s.processFlags(flags); err != nil {
-		return err
-	}
-
+func (s *Stream) readData(length uint32, flags uint16, conn io.Reader) error {
 	// Check that our recv window is not exceeded
-	length := hdr.Length()
 	if length == 0 {
 		return nil
 	}
-
-	// Wrap in a limited reader
-	conn = &io.LimitedReader{R: conn, N: int64(length)}
 
 	// Copy into buffer
 	s.recvLock.Lock()
 
 	if length > s.recvWindow {
 		s.session.logger.Printf("[ERR] yamux: receive window exceeded (stream: %d, remain: %d, recv: %d)", s.id, s.recvWindow, length)
+		s.recvLock.Unlock()
 		return ErrRecvWindowExceeded
 	}
 
@@ -420,7 +469,7 @@ func (s *Stream) readData(hdr header, flags uint16, conn io.Reader) error {
 		// This way we can read in the whole packet without further allocations.
 		s.recvBuf = bytes.NewBuffer(make([]byte, 0, length))
 	}
-	if _, err := io.Copy(s.recvBuf, conn); err != nil {
+	if _, err := io.CopyN(s.recvBuf, conn, int64(length)); err != nil {
 		s.session.logger.Printf("[ERR] yamux: Failed to read stream data: %v", err)
 		s.recvLock.Unlock()
 		return err
@@ -458,6 +507,15 @@ func (s *Stream) SetWriteDeadline(t time.Time) error {
 	s.writeDeadline.Store(t)
 	asyncNotify(s.sendNotifyCh)
 	return nil
+}
+
+// SetContext set stream context
+func (s *Stream) SetContext(ctx context.Context) {
+	if ctx != nil {
+		s.cancelDeadline.Store(ctx.Done())
+	} else {
+		s.cancelDeadline.Store(nil)
+	}
 }
 
 // Shrink is used to compact the amount of buffers utilized
