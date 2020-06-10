@@ -273,6 +273,20 @@ func TestAccept(t *testing.T) {
 	}
 }
 
+func TestAcceptTimeout(t *testing.T) {
+	client, server := testClientServer()
+	defer client.Close()
+	defer server.Close()
+
+	session, err := client.AcceptStreamWithTimeout(1 * time.Microsecond)
+	if err != ErrTimeout {
+		t.Fatalf("bad: %v", err)
+	}
+	if session != nil {
+		t.Fatalf("bad: %v", session)
+	}
+}
+
 func TestNonNilInterface(t *testing.T) {
 	_, server := testClientServer()
 	server.Close()
