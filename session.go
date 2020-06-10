@@ -84,6 +84,13 @@ type sendReady struct {
 	Err  chan error
 }
 
+// Optional interface that the underlying connection can implement to return
+// an existing *bufio.Reader if there is one. This prevents yamux from creating
+// a layered bufio.Reader in the case that the conn already has one.
+type BufioReaderer interface {
+	BufioReader() *bufio.Reader
+}
+
 // newSession is used to construct a new session
 func newSession(config *Config, conn io.ReadWriteCloser, client bool) *Session {
 	logger := config.Logger
@@ -91,11 +98,19 @@ func newSession(config *Config, conn io.ReadWriteCloser, client bool) *Session {
 		logger = log.New(config.LogOutput, "", log.LstdFlags)
 	}
 
+	var bufRead *bufio.Reader
+
+	if br, ok := conn.(BufioReaderer); ok {
+		bufRead = br.BufioReader()
+	} else {
+		bufRead = bufio.NewReader(conn)
+	}
+
 	s := &Session{
 		config:     config,
 		logger:     logger,
 		conn:       conn,
-		bufRead:    bufio.NewReader(conn),
+		bufRead:    bufRead,
 		pings:      make(map[uint32]chan struct{}),
 		streams:    make(map[uint32]*Stream),
 		inflight:   make(map[uint32]struct{}),
