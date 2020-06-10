@@ -2,6 +2,7 @@ package yamux
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -210,6 +211,24 @@ func (s *Session) Accept() (net.Conn, error) {
 // is ready to be accepted.
 func (s *Session) AcceptStream() (*Stream, error) {
 	select {
+	case stream := <-s.acceptCh:
+		if err := stream.sendWindowUpdate(); err != nil {
+			return nil, err
+		}
+		return stream, nil
+	case <-s.shutdownCh:
+		return nil, s.shutdownErr
+	}
+}
+
+// AcceptStream is used to block until the next available stream
+// is ready to be accepted. When the context is canceled, the session
+// is automatically closed.
+func (s *Session) AcceptStreamWithContext(ctx context.Context) (*Stream, error) {
+	select {
+	case <-ctx.Done():
+		s.Close()
+		return nil, ctx.Err()
 	case stream := <-s.acceptCh:
 		if err := stream.sendWindowUpdate(); err != nil {
 			return nil, err
