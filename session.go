@@ -128,9 +128,9 @@ func (s *Session) IsClosed() bool {
 	}
 }
 
-// CloseChan returns a read-only channel which is closed as
+// ClosedChan returns a read-only channel which is closed as
 // soon as the session is closed.
-func (s *Session) CloseChan() <-chan struct{} {
+func (s *Session) ClosedChan() <-chan struct{} {
 	return s.shutdownCh
 }
 
@@ -504,9 +504,9 @@ func (s *Session) handleStreamMessage(hdr header) error {
 				s.logger.Printf("[ERR] yamux: Failed to discard data: %v", err)
 				return nil
 			}
-		} else {
+		} /*else { Hint: Just ignore this. The stream might have closed already.
 			s.logger.Printf("[WARN] yamux: frame for missing stream: %v", hdr)
-		}
+		}*/
 		return nil
 	}
 

@@ -1,5 +1,7 @@
 # Yamux
 
+**Hint**: This fork removed the half closing functionality.
+
 Yamux (Yet another Multiplexer) is a multiplexing library for Golang.
 It relies on an underlying connection to provide reliability
 and ordering, such as TCP or Unix domain sockets, and provides

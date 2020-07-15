@@ -15,8 +15,6 @@ const (
 	streamSYNSent
 	streamSYNReceived
 	streamEstablished
-	streamLocalClose
-	streamRemoteClose
 	streamClosed
 	streamReset
 )
@@ -88,10 +86,6 @@ func (s *Stream) Read(b []byte) (n int, err error) {
 START:
 	s.stateLock.Lock()
 	switch s.state {
-	case streamLocalClose:
-		fallthrough
-	case streamRemoteClose:
-		fallthrough
 	case streamClosed:
 		s.recvLock.Lock()
 		if s.recvBuf == nil || s.recvBuf.Len() == 0 {
@@ -165,8 +159,6 @@ func (s *Stream) write(b []byte) (n int, err error) {
 START:
 	s.stateLock.Lock()
 	switch s.state {
-	case streamLocalClose:
-		fallthrough
 	case streamClosed:
 		s.stateLock.Unlock()
 		return 0, ErrStreamClosed
@@ -284,6 +276,19 @@ func (s *Stream) sendClose() error {
 	return nil
 }
 
+// IsClosed indicates whenever the stream was closed.
+func (s *Stream) IsClosed() (closed bool) {
+	s.stateLock.Lock()
+	switch s.state {
+	case streamClosed:
+		fallthrough
+	case streamReset:
+		closed = true
+	}
+	s.stateLock.Unlock()
+	return
+}
+
 // Close is used to close the stream
 func (s *Stream) Close() error {
 	closeStream := false
@@ -295,11 +300,6 @@ func (s *Stream) Close() error {
 	case streamSYNReceived:
 		fallthrough
 	case streamEstablished:
-		s.state = streamLocalClose
-		goto SEND_CLOSE
-
-	case streamLocalClose:
-	case streamRemoteClose:
 		s.state = streamClosed
 		closeStream = true
 		goto SEND_CLOSE
@@ -349,22 +349,9 @@ func (s *Stream) processFlags(flags uint16) error {
 		s.session.establishStream(s.id)
 	}
 	if flags&flagFIN == flagFIN {
-		switch s.state {
-		case streamSYNSent:
-			fallthrough
-		case streamSYNReceived:
-			fallthrough
-		case streamEstablished:
-			s.state = streamRemoteClose
-			s.notifyWaiting()
-		case streamLocalClose:
-			s.state = streamClosed
-			closeStream = true
-			s.notifyWaiting()
-		default:
-			s.session.logger.Printf("[ERR] yamux: unexpected FIN flag in state %d", s.state)
-			return ErrUnexpectedFlag
-		}
+		s.state = streamClosed
+		closeStream = true
+		s.notifyWaiting()
 	}
 	if flags&flagRST == flagRST {
 		s.state = streamReset

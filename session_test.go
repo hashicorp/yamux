@@ -157,11 +157,10 @@ func TestCloseBeforeAck(t *testing.T) {
 	defer server.Close()
 
 	for i := 0; i < 8; i++ {
-		s, err := client.OpenStream()
+		_, err := client.OpenStream()
 		if err != nil {
 			t.Fatal(err)
 		}
-		s.Close()
 	}
 
 	for i := 0; i < 8; i++ {
@@ -363,11 +362,11 @@ func TestSendData_Small(t *testing.T) {
 		panic("timeout")
 	}
 
-	if client.NumStreams() != 0 {
-		t.Fatalf("bad")
+	if n := client.NumStreams(); n != 0 {
+		t.Fatalf("bad %v", n)
 	}
-	if server.NumStreams() != 0 {
-		t.Fatalf("bad")
+	if n := server.NumStreams(); n != 0 {
+		t.Fatalf("bad %v", n)
 	}
 }
 
@@ -460,6 +459,8 @@ func TestGoAway(t *testing.T) {
 	if err := server.GoAway(); err != nil {
 		t.Fatalf("err: %v", err)
 	}
+
+	time.Sleep(10 * time.Millisecond)
 
 	_, err := client.Open()
 	if err != ErrRemoteGoAway {
@@ -618,7 +619,8 @@ func TestManyStreams_PingPong(t *testing.T) {
 	wg.Wait()
 }
 
-func TestHalfClose(t *testing.T) {
+// TODO: Create a TestFullClose
+/* func TestHalfClose(t *testing.T) {
 	client, server := testClientServer()
 	defer client.Close()
 	defer server.Close()
@@ -669,7 +671,7 @@ func TestHalfClose(t *testing.T) {
 	if n != 0 {
 		t.Fatalf("bad: %v", n)
 	}
-}
+} */
 
 func TestReadDeadline(t *testing.T) {
 	client, server := testClientServer()
@@ -1055,11 +1057,10 @@ func TestBacklogExceeded_Accept(t *testing.T) {
 	max := 5 * client.config.AcceptBacklog
 	go func() {
 		for i := 0; i < max; i++ {
-			stream, err := server.Accept()
+			_, err := server.Accept()
 			if err != nil {
 				t.Fatalf("err: %v", err)
 			}
-			defer stream.Close()
 		}
 	}()
 
@@ -1152,7 +1153,6 @@ func TestSession_PartialReadWindowUpdate(t *testing.T) {
 		if err != nil {
 			t.Fatalf("err: %v", err)
 		}
-		defer wr.Close()
 
 		if wr.sendWindow != client.config.MaxStreamWindowSize {
 			t.Fatalf("sendWindow: exp=%d, got=%d", client.config.MaxStreamWindowSize, wr.sendWindow)
@@ -1316,11 +1316,10 @@ func TestSession_ConnectionWriteTimeout(t *testing.T) {
 	go func() {
 		defer wg.Done()
 
-		stream, err := server.AcceptStream()
+		_, err := server.AcceptStream()
 		if err != nil {
 			t.Fatalf("err: %v", err)
 		}
-		defer stream.Close()
 	}()
 
 	// The client will open the stream and then block outbound writes, we'll
