@@ -44,6 +44,7 @@ type Stream struct {
 
 	recvNotifyCh chan struct{}
 	sendNotifyCh chan struct{}
+	closedChan   chan struct{}
 
 	readDeadline  atomic.Value // time.Time
 	writeDeadline atomic.Value // time.Time
@@ -64,6 +65,7 @@ func newStream(session *Session, id uint32, state streamState) *Stream {
 		sendWindow:   initialStreamWindow,
 		recvNotifyCh: make(chan struct{}, 1),
 		sendNotifyCh: make(chan struct{}, 1),
+		closedChan:   make(chan struct{}),
 	}
 	s.readDeadline.Store(time.Time{})
 	s.writeDeadline.Store(time.Time{})
@@ -277,21 +279,24 @@ func (s *Stream) sendClose() error {
 }
 
 // IsClosed indicates whenever the stream was closed.
-func (s *Stream) IsClosed() (closed bool) {
-	s.stateLock.Lock()
-	switch s.state {
-	case streamClosed:
-		fallthrough
-	case streamReset:
-		closed = true
+func (s *Stream) IsClosed() bool {
+	select {
+	case <-s.closedChan:
+		return true
+	default:
+		return false
 	}
-	s.stateLock.Unlock()
-	return
+}
+
+// ClosedChan returns a channel which is closed as soon as the stream closes.
+func (s *Stream) ClosedChan() <-chan struct{} {
+	return s.closedChan
 }
 
 // Close is used to close the stream
 func (s *Stream) Close() error {
 	closeStream := false
+
 	s.stateLock.Lock()
 	switch s.state {
 	// Opened means we need to signal a close
@@ -300,24 +305,28 @@ func (s *Stream) Close() error {
 	case streamSYNReceived:
 		fallthrough
 	case streamEstablished:
-		s.state = streamClosed
 		closeStream = true
-		goto SEND_CLOSE
 
 	case streamClosed:
 	case streamReset:
 	default:
 		panic("unhandled state")
 	}
+	if !closeStream {
+		s.stateLock.Unlock()
+		return nil
+	}
+
+	// Close the channel if not already closed. Must happen in the locked state context.
+	if !s.IsClosed() {
+		close(s.closedChan)
+	}
+	s.state = streamClosed
 	s.stateLock.Unlock()
-	return nil
-SEND_CLOSE:
-	s.stateLock.Unlock()
+
 	s.sendClose()
 	s.notifyWaiting()
-	if closeStream {
-		s.session.closeStream(s.id)
-	}
+	s.session.closeStream(s.id)
 	return nil
 }
 
@@ -325,6 +334,10 @@ SEND_CLOSE:
 func (s *Stream) forceClose() {
 	s.stateLock.Lock()
 	s.state = streamClosed
+	// Close the channel if not already closed. Must happen in the locked state context.
+	if !s.IsClosed() {
+		close(s.closedChan)
+	}
 	s.stateLock.Unlock()
 	s.notifyWaiting()
 }
@@ -357,6 +370,10 @@ func (s *Stream) processFlags(flags uint16) error {
 		s.state = streamReset
 		closeStream = true
 		s.notifyWaiting()
+	}
+	// Close the channel if not already closed. Must happen in the locked state context.
+	if closeStream && !s.IsClosed() {
+		close(s.closedChan)
 	}
 	return nil
 }
