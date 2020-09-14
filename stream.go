@@ -21,6 +21,14 @@ const (
 	streamReset
 )
 
+type streamFlags uint16
+
+const (
+	writeCloseFlag streamFlags = 1 << iota
+	writeCloseFlagSent
+	readCloseFlag
+)
+
 // Stream is used to represent a logical stream
 // within a session.
 type Stream struct {
@@ -31,6 +39,7 @@ type Stream struct {
 	session *Session
 
 	state     streamState
+	flags     streamFlags
 	stateLock sync.Mutex
 
 	recvBuf  *bytes.Buffer
@@ -104,6 +113,15 @@ START:
 		s.stateLock.Unlock()
 		return 0, ErrConnectionReset
 	}
+	if (s.flags & readCloseFlag) != 0 {
+		s.recvLock.Lock()
+		if s.recvBuf == nil || s.recvBuf.Len() == 0 {
+			s.recvLock.Unlock()
+			s.stateLock.Unlock()
+			return 0, io.EOF
+		}
+		s.recvLock.Unlock()
+	}
 	s.stateLock.Unlock()
 
 	// If there is no data available, block
@@ -174,6 +192,10 @@ START:
 		s.stateLock.Unlock()
 		return 0, ErrConnectionReset
 	}
+	if (s.flags & writeCloseFlag) != 0 {
+		s.stateLock.Unlock()
+		return 0, ErrWriteClosed
+	}
 	s.stateLock.Unlock()
 
 	// If there is no data available, block
@@ -230,6 +252,10 @@ func (s *Stream) sendFlags() uint16 {
 	case streamSYNReceived:
 		flags |= flagACK
 		s.state = streamEstablished
+	}
+	if (s.flags & writeCloseFlag & ^writeCloseFlagSent) != 0 {
+		flags |= flagCloseWrite
+		s.flags |= writeCloseFlagSent
 	}
 	return flags
 }
@@ -321,6 +347,53 @@ SEND_CLOSE:
 	return nil
 }
 
+// CloseWrite is used to close this side's write end of the stream.
+func (s *Stream) CloseWrite() error {
+	s.stateLock.Lock()
+	s.flags |= writeCloseFlag
+	switch s.state {
+	// Opened means we need to signal a close
+	case streamSYNSent:
+		fallthrough
+	case streamSYNReceived:
+		fallthrough
+	case streamEstablished:
+		goto SEND_CLOSE
+
+	case streamLocalClose:
+	case streamRemoteClose:
+		goto SEND_CLOSE
+	case streamClosed:
+	case streamReset:
+	default:
+		panic("unhandled state")
+	}
+	s.stateLock.Unlock()
+	return nil
+SEND_CLOSE:
+	s.stateLock.Unlock()
+	s.sendCloseWrite()
+	s.notifyWaiting()
+	return nil
+}
+
+// sendCloseWrite is used to send a write close notice
+func (s *Stream) sendCloseWrite() error {
+	s.controlHdrLock.Lock()
+	defer s.controlHdrLock.Unlock()
+
+	flags := s.sendFlags()
+	if (flags & flagCloseWrite) == 0 {
+		// We have already sent it; no need to do so again
+		return nil
+	}
+	s.controlHdr.encode(typeWindowUpdate, flags, s.id, 0)
+	if err := s.session.waitForSendErr(s.controlHdr, nil, s.controlErr); err != nil {
+		return err
+	}
+	return nil
+}
+
 // forceClose is used for when the session is exiting
 func (s *Stream) forceClose() {
 	s.stateLock.Lock()
@@ -347,6 +420,10 @@ func (s *Stream) processFlags(flags uint16) error {
 			s.state = streamEstablished
 		}
 		s.session.establishStream(s.id)
+	}
+	if (flags & flagCloseWrite) == flagCloseWrite {
+		s.flags |= readCloseFlag
+		s.notifyWaiting()
 	}
 	if flags&flagFIN == flagFIN {
 		switch s.state {

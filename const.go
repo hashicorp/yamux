@@ -35,6 +35,9 @@ var (
 	// ErrStreamClosed is returned when using a closed stream
 	ErrStreamClosed = fmt.Errorf("stream closed")
 
+	// ErrWriteClosed is returned when using a closed write end of a stream
+	ErrWriteClosed = fmt.Errorf("write end of stream closed")
+
 	// ErrUnexpectedFlag is set when we get an unexpected flag
 	ErrUnexpectedFlag = fmt.Errorf("unexpected flag")
 
@@ -93,6 +96,11 @@ const (
 
 	// RST is used to hard close a given stream.
 	flagRST
+
+	// flagCloseWrite is sent to notify the remote end
+	// that no more data will be written to the stream.
+	// May be sent with a data payload.
+	flagCloseWrite
 )
 
 const (
