@@ -1351,3 +1351,34 @@ func TestSession_ConnectionWriteTimeout(t *testing.T) {
 
 	wg.Wait()
 }
+
+func TestCloseWrite(t *testing.T) {
+	client, server := testClientServer()
+	defer client.Close()
+	defer server.Close()
+
+	stream, err := client.OpenStream()
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	defer stream.Close()
+
+	stream2, err := server.Accept()
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	defer stream2.Close()
+
+	if _, err := stream.Write([]byte("test")); err != nil {
+		t.Fatal(err)
+	} else if err := stream.CloseWrite(); err != nil {
+		t.Fatal(err)
+	}
+
+	data, err := ioutil.ReadAll(stream2)
+	if err != nil {
+		t.Fatal(err)
+	} else if !bytes.Equal(data, []byte("test")) {
+		t.Fatalf("got data %q, want %q", data, "test")
+	}
+}
