@@ -273,6 +273,76 @@ func TestAccept(t *testing.T) {
 	}
 }
 
+func TestClose_closeTimeout(t *testing.T) {
+	conf := testConf()
+	conf.StreamCloseTimeout = 10 * time.Millisecond
+	client, server := testClientServerConfig(conf)
+	defer client.Close()
+	defer server.Close()
+
+	if client.NumStreams() != 0 {
+		t.Fatalf("bad")
+	}
+	if server.NumStreams() != 0 {
+		t.Fatalf("bad")
+	}
+
+	wg := &sync.WaitGroup{}
+	wg.Add(2)
+
+	// Open a stream on the client but only close it on the server.
+	// We want to see if the stream ever gets cleaned up on the client.
+
+	var clientStream *Stream
+	go func() {
+		defer wg.Done()
+		var err error
+		clientStream, err = client.OpenStream()
+		if err != nil {
+			t.Fatalf("err: %v", err)
+		}
+	}()
+
+	go func() {
+		defer wg.Done()
+		stream, err := server.AcceptStream()
+		if err != nil {
+			t.Fatalf("err: %v", err)
+		}
+		if err := stream.Close(); err != nil {
+			t.Fatalf("err: %v", err)
+		}
+	}()
+
+	doneCh := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(doneCh)
+	}()
+
+	select {
+	case <-doneCh:
+	case <-time.After(time.Second):
+		panic("timeout")
+	}
+
+	// We should have zero streams after our timeout period
+	time.Sleep(100 * time.Millisecond)
+
+	if v := server.NumStreams(); v > 0 {
+		t.Fatalf("should have zero streams: %d", v)
+	}
+	if v := client.NumStreams(); v > 0 {
+		t.Fatalf("should have zero streams: %d", v)
+	}
+
+	if _, err := clientStream.Write([]byte("hello")); err == nil {
+		t.Fatal("should error on write")
+	} else if err.Error() != "connection reset" {
+		t.Fatalf("expected connection reset, got %q", err)
+	}
+}
+
 func TestNonNilInterface(t *testing.T) {
 	_, server := testClientServer()
 	server.Close()
