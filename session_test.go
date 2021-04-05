@@ -2,6 +2,7 @@ package yamux
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -164,7 +165,7 @@ func TestCloseBeforeAck(t *testing.T) {
 	}
 
 	for i := 0; i < 8; i++ {
-		s, err := server.AcceptStream()
+		s, err := server.AcceptStream(context.Background())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -205,7 +206,7 @@ func TestAccept(t *testing.T) {
 
 	go func() {
 		defer wg.Done()
-		stream, err := server.AcceptStream()
+		stream, err := server.AcceptStream(context.Background())
 		if err != nil {
 			t.Fatalf("err: %v", err)
 		}
@@ -219,7 +220,7 @@ func TestAccept(t *testing.T) {
 
 	go func() {
 		defer wg.Done()
-		stream, err := client.AcceptStream()
+		stream, err := client.AcceptStream(context.Background())
 		if err != nil {
 			t.Fatalf("err: %v", err)
 		}
@@ -276,7 +277,7 @@ func TestNonNilInterface(t *testing.T) {
 	_, server := testClientServer()
 	server.Close()
 
-	conn, err := server.Accept()
+	conn, err := server.Accept(context.Background())
 	if err != nil && conn != nil {
 		t.Error("bad: accept should return a connection of nil value")
 	}
@@ -297,7 +298,7 @@ func TestSendData_Small(t *testing.T) {
 
 	go func() {
 		defer wg.Done()
-		stream, err := server.AcceptStream()
+		stream, err := server.AcceptStream(context.Background())
 		if err != nil {
 			t.Fatalf("err: %v", err)
 		}
@@ -390,7 +391,7 @@ func TestSendData_Large(t *testing.T) {
 
 	go func() {
 		defer wg.Done()
-		stream, err := server.AcceptStream()
+		stream, err := server.AcceptStream(context.Background())
 		if err != nil {
 			t.Fatalf("err: %v", err)
 		}
@@ -477,7 +478,7 @@ func TestManyStreams(t *testing.T) {
 
 	acceptor := func(i int) {
 		defer wg.Done()
-		stream, err := server.AcceptStream()
+		stream, err := server.AcceptStream(context.Background())
 		if err != nil {
 			t.Fatalf("err: %v", err)
 		}
@@ -538,7 +539,7 @@ func TestManyStreams_PingPong(t *testing.T) {
 
 	acceptor := func(i int) {
 		defer wg.Done()
-		stream, err := server.AcceptStream()
+		stream, err := server.AcceptStream(context.Background())
 		if err != nil {
 			t.Fatalf("err: %v", err)
 		}
@@ -633,7 +634,7 @@ func TestManyStreams_PingPong(t *testing.T) {
 		t.Fatalf("err: %v", err)
 	}
 
-	stream2, err := server.Accept()
+	stream2, err := server.Accept(context.Background())
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -684,7 +685,7 @@ func TestReadDeadline(t *testing.T) {
 	}
 	defer stream.Close()
 
-	stream2, err := server.Accept()
+	stream2, err := server.Accept(context.Background())
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -711,7 +712,7 @@ func TestReadDeadline_BlockedRead(t *testing.T) {
 	}
 	defer stream.Close()
 
-	stream2, err := server.Accept()
+	stream2, err := server.Accept(context.Background())
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -755,7 +756,7 @@ func TestWriteDeadline(t *testing.T) {
 	}
 	defer stream.Close()
 
-	stream2, err := server.Accept()
+	stream2, err := server.Accept(context.Background())
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -788,7 +789,7 @@ func TestWriteDeadline_BlockedWrite(t *testing.T) {
 	}
 	defer stream.Close()
 
-	stream2, err := server.Accept()
+	stream2, err := server.Accept(context.Background())
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -910,7 +911,7 @@ func TestKeepAlive_Timeout(t *testing.T) {
 
 	errCh := make(chan error, 1)
 	go func() {
-		_, err := server.Accept() // Wait until server closes
+		_, err := server.Accept(context.Background()) // Wait until server closes
 		errCh <- err
 	}()
 
@@ -950,7 +951,7 @@ func TestLargeWindow(t *testing.T) {
 	}
 	defer stream.Close()
 
-	stream2, err := server.Accept()
+	stream2, err := server.Accept(context.Background())
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -988,7 +989,7 @@ func TestSendData_VeryLarge(t *testing.T) {
 	for i := 0; i < workers; i++ {
 		go func() {
 			defer wg.Done()
-			stream, err := server.AcceptStream()
+			stream, err := server.AcceptStream(context.Background())
 			if err != nil {
 				t.Fatalf("err: %v", err)
 			}
@@ -1057,7 +1058,7 @@ func TestBacklogExceeded_Accept(t *testing.T) {
 	max := 5 * client.config.AcceptBacklog
 	go func() {
 		for i := 0; i < max; i++ {
-			_, err := server.Accept()
+			_, err := server.Accept(context.Background())
 			if err != nil {
 				t.Fatalf("err: %v", err)
 			}
@@ -1093,7 +1094,7 @@ func TestSession_WindowUpdateWriteDuringRead(t *testing.T) {
 	go func() {
 		defer wg.Done()
 
-		stream, err := server.AcceptStream()
+		stream, err := server.AcceptStream(context.Background())
 		if err != nil {
 			t.Fatalf("err: %v", err)
 		}
@@ -1149,7 +1150,7 @@ func TestSession_PartialReadWindowUpdate(t *testing.T) {
 		defer wg.Done()
 
 		var err error
-		wr, err = server.AcceptStream()
+		wr, err = server.AcceptStream(context.Background())
 		if err != nil {
 			t.Fatalf("err: %v", err)
 		}
@@ -1196,7 +1197,7 @@ func TestSession_sendNoWait_Timeout(t *testing.T) {
 	go func() {
 		defer wg.Done()
 
-		stream, err := server.AcceptStream()
+		stream, err := server.AcceptStream(context.Background())
 		if err != nil {
 			t.Fatalf("err: %v", err)
 		}
@@ -1253,7 +1254,7 @@ func TestSession_PingOfDeath(t *testing.T) {
 	go func() {
 		defer wg.Done()
 
-		stream, err := server.AcceptStream()
+		stream, err := server.AcceptStream(context.Background())
 		if err != nil {
 			t.Fatalf("err: %v", err)
 		}
@@ -1316,7 +1317,7 @@ func TestSession_ConnectionWriteTimeout(t *testing.T) {
 	go func() {
 		defer wg.Done()
 
-		_, err := server.AcceptStream()
+		_, err := server.AcceptStream(context.Background())
 		if err != nil {
 			t.Fatalf("err: %v", err)
 		}

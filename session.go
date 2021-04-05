@@ -2,6 +2,7 @@ package yamux
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -198,8 +199,8 @@ GET_ID:
 
 // Accept is used to block until the next available stream
 // is ready to be accepted.
-func (s *Session) Accept() (net.Conn, error) {
-	conn, err := s.AcceptStream()
+func (s *Session) Accept(ctx context.Context) (net.Conn, error) {
+	conn, err := s.AcceptStream(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -208,7 +209,7 @@ func (s *Session) Accept() (net.Conn, error) {
 
 // AcceptStream is used to block until the next available stream
 // is ready to be accepted.
-func (s *Session) AcceptStream() (*Stream, error) {
+func (s *Session) AcceptStream(ctx context.Context) (*Stream, error) {
 	select {
 	case stream := <-s.acceptCh:
 		if err := stream.sendWindowUpdate(); err != nil {
@@ -217,6 +218,8 @@ func (s *Session) AcceptStream() (*Stream, error) {
 		return stream, nil
 	case <-s.shutdownCh:
 		return nil, s.shutdownErr
+	case <-ctx.Done():
+		return nil, ctx.Err()
 	}
 }
 
