@@ -50,7 +50,10 @@ var (
 
 	// ErrTimeout is used when we reach an IO deadline
 	ErrTimeout = &NetError{
-		err:     fmt.Errorf("i/o deadline reached"),
+		err: fmt.Errorf("i/o deadline reached"),
+
+		// Error should meet net.Error interface for timeouts for compatability
+		// with standard library expectations, such as http servers.
 		timeout: true,
 	}
 

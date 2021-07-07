@@ -768,12 +768,22 @@ func TestReadDeadline(t *testing.T) {
 	if err != ErrTimeout {
 		t.Fatalf("err: %v", err)
 	}
+
 	// See https://github.com/hashicorp/yamux/issues/90
-	// Standard http server package will read from connections in background to detect if it's alive.
-	// It sets read deadline on connections and detect if the returned error is timeout error which implements net.Error.
-	// HTTP server will cancel all server requests if it isn't timeout error from connections.
+	// The standard library's http server package will read from connections in
+	// the background to detect if they are alive.
+	//
+	// It sets a read deadline on connections and detect if the returned error
+	// is a network timeout error which implements net.Error.
+	//
+	// The HTTP server will cancel all server requests if it isn't timeout error
+	// from the connection.
+	//
+	// We assert that we return an error meeting the interface to avoid
+	// accidently breaking yamux session compatability with the standard
+	// library's http server implementation.
 	if netErr, ok := err.(net.Error); !ok || !netErr.Timeout() {
-		t.Fatalf("error of reading timeout is expected to implement net.Error and return true when calling Timeout(), but not")
+		t.Fatalf("reading timeout error is expected to implement net.Error and return true when calling Timeout()")
 	}
 }
 
