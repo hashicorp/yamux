@@ -469,7 +469,7 @@ func (s *Session) recvLoop() error {
 		}
 
 		mt := hdr.MsgType()
-		if mt < typeData || mt > typeGoAway {
+		if int(mt) >= len(handlers) || handlers[mt] == nil {
 			return ErrInvalidMsgType
 		}
 
