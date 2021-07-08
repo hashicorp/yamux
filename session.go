@@ -74,6 +74,9 @@ type Session struct {
 	shutdownErr  error
 	shutdownCh   chan struct{}
 	shutdownLock sync.Mutex
+
+	// RTT is used to record rtt from keepalive pings
+	RTT time.Duration
 }
 
 // sendReady is used to either mark a stream as ready
@@ -312,7 +315,8 @@ func (s *Session) keepalive() {
 	for {
 		select {
 		case <-time.After(s.config.KeepAliveInterval):
-			_, err := s.Ping()
+			rtt, err := s.Ping()
+			s.RTT = rtt
 			if err != nil {
 				if err != ErrSessionShutdown {
 					s.logger.Printf("[ERR] yamux: keepalive failed: %v", err)
