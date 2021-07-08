@@ -84,3 +84,6 @@ func server() {
 
 ```
 
+# Copyright
+
+2014-2016 Armon Dadgar
