@@ -123,6 +123,9 @@ START:
 
 	// Send a window update potentially
 	err = s.sendWindowUpdate()
+	if err == ErrSessionShutdown {
+		err = nil
+	}
 	return n, err
 
 WAIT:
