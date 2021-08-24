@@ -31,6 +31,11 @@ type Config struct {
 	// window size that we allow for a stream.
 	MaxStreamWindowSize uint32
 
+	// StreamOpenTimeout is the maximum amount of time that a stream will
+	// be allowed to remain open until it is ACKed.
+	// Once the timeout is reached the session will be gracefully closed.
+	StreamOpenTimeout time.Duration
+
 	// StreamCloseTimeout is the maximum time that a stream will allowed to
 	// be in a half-closed state when `Close` is called before forcibly
 	// closing the connection. Forcibly closed connections will empty the
@@ -56,6 +61,7 @@ func DefaultConfig() *Config {
 		ConnectionWriteTimeout: 10 * time.Second,
 		MaxStreamWindowSize:    initialStreamWindow,
 		StreamCloseTimeout:     5 * time.Minute,
+		StreamOpenTimeout:      30 * time.Second,
 		LogOutput:              os.Stderr,
 	}
 }

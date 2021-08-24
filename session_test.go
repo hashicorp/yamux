@@ -1,12 +1,14 @@
 package yamux
 
 import (
+	"bufio"
 	"bytes"
 	"fmt"
 	"io"
 	"io/ioutil"
 	"log"
 	"net"
+	"os"
 	"reflect"
 	"runtime"
 	"strings"
@@ -271,6 +273,39 @@ func TestAccept(t *testing.T) {
 	case <-doneCh:
 	case <-time.After(time.Second):
 		panic("timeout")
+	}
+}
+
+func TestOpenStreamTimeout(t *testing.T) {
+	const timeout = 25 * time.Millisecond
+
+	cfg := testConf()
+	cfg.StreamOpenTimeout = timeout
+
+	client, server := testClientServerConfig(cfg)
+	defer client.Close()
+	defer server.Close()
+
+	clientLogs := captureLogs(client)
+
+	// Open a single stream without a server to acknowledge it.
+	s, err := client.OpenStream()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Sleep for longer than the stream open timeout.
+	// Since no ACKs are received, the stream and session should be closed.
+	time.Sleep(timeout * 5)
+
+	if !clientLogs.match([]string{"[ERR] yamux: aborted stream open (destination=yamux:remote): i/o deadline reached"}) {
+		t.Fatalf("server log incorect: %v", clientLogs.logs())
+	}
+	if s.state != streamClosed {
+		t.Fatalf("stream should have been closed")
+	}
+	if !client.IsClosed() {
+		t.Fatalf("session should have been closed")
 	}
 }
 
