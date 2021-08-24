@@ -61,7 +61,6 @@ func DefaultConfig() *Config {
 		ConnectionWriteTimeout: 10 * time.Second,
 		MaxStreamWindowSize:    initialStreamWindow,
 		StreamCloseTimeout:     5 * time.Minute,
-		StreamOpenTimeout:      30 * time.Second,
 		LogOutput:              os.Stderr,
 	}
 }

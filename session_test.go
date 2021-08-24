@@ -1,14 +1,12 @@
 package yamux
 
 import (
-	"bufio"
 	"bytes"
 	"fmt"
 	"io"
 	"io/ioutil"
 	"log"
 	"net"
-	"os"
 	"reflect"
 	"runtime"
 	"strings"
