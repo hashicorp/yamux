@@ -1,3 +1,3 @@
-module github.com/xiicloud/yamux
+module github.com/hashicorp/yamux
 
-go 1.16
+go 1.15
