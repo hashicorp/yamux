@@ -32,7 +32,7 @@ type Config struct {
 	MaxStreamWindowSize uint32
 
 	// StreamOpenTimeout is the maximum amount of time that a stream will
-	// be allowed to remain open until it is ACKed.
+	// be allowed to remain in pending state while waiting for an ack from the peer.
 	// Once the timeout is reached the session will be gracefully closed.
 	StreamOpenTimeout time.Duration
 
