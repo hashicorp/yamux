@@ -201,7 +201,7 @@ GET_ID:
 }
 
 // setOpenTimeout implements a timeout for streams that are opened but not established.
-// If the StreamOpenTimeout is exceeded we assume the server is unable to ACK,
+// If the StreamOpenTimeout is exceeded we assume the peer is unable to ACK,
 // and close the session.
 // The number of running timers is bounded by the capacity of the synCh.
 func (s *Session) setOpenTimeout(stream *Stream) {
