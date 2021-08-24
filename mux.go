@@ -34,6 +34,8 @@ type Config struct {
 	// StreamOpenTimeout is the maximum amount of time that a stream will
 	// be allowed to remain in pending state while waiting for an ack from the peer.
 	// Once the timeout is reached the session will be gracefully closed.
+	// A zero value disables the StreamOpenTimeout allowing unbounded
+	// blocking on OpenStream calls.
 	StreamOpenTimeout time.Duration
 
 	// StreamCloseTimeout is the maximum time that a stream will allowed to
