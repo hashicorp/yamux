@@ -425,16 +425,12 @@ func (s *Session) send() {
 		case ready := <-s.sendCh:
 			// Send a header if ready
 			if ready.Hdr != nil {
-				sent := 0
-				for sent < len(ready.Hdr) {
-					n, err := s.conn.Write(ready.Hdr[sent:])
-					if err != nil {
-						s.logger.Printf("[ERR] yamux: Failed to write header: %v", err)
-						asyncSendErr(ready.Err, err)
-						s.exitErr(err)
-						return
-					}
-					sent += n
+				_, err := s.conn.Write(ready.Hdr)
+				if err != nil {
+					s.logger.Printf("[ERR] yamux: Failed to write header: %v", err)
+					asyncSendErr(ready.Err, err)
+					s.exitErr(err)
+					return
 				}
 			}
 
