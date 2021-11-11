@@ -328,7 +328,7 @@ func (s *Session) Ping() (time.Duration, error) {
 	}
 
 	// Compute the RTT
-	return time.Now().Sub(start), nil
+	return time.Since(start), nil
 }
 
 // keepalive is a long running goroutine that periodically does
