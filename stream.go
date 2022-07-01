@@ -465,6 +465,7 @@ func (s *Stream) readData(hdr header, flags uint16, conn io.Reader) error {
 
 	if length > s.recvWindow {
 		s.session.logger.Printf("[ERR] yamux: receive window exceeded (stream: %d, remain: %d, recv: %d)", s.id, s.recvWindow, length)
+		s.recvLock.Unlock()
 		return ErrRecvWindowExceeded
 	}
 
