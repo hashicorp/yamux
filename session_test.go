@@ -1047,6 +1047,8 @@ func TestKeepAlive_Timeout(t *testing.T) {
 		t.Fatalf("timeout waiting for timeout")
 	}
 
+	clientConn.writeBlocker.Unlock()
+
 	if !server.IsClosed() {
 		t.Fatalf("server should have closed")
 	}
@@ -1243,6 +1245,7 @@ func TestSession_WindowUpdateWriteDuringRead(t *testing.T) {
 
 		conn := client.conn.(*pipeConn)
 		conn.writeBlocker.Lock()
+		defer conn.writeBlocker.Unlock()
 
 		_, err = stream.Read(make([]byte, flood))
 		if err != ErrConnectionWriteTimeout {
@@ -1338,6 +1341,7 @@ func TestSession_sendNoWait_Timeout(t *testing.T) {
 
 		conn := client.conn.(*pipeConn)
 		conn.writeBlocker.Lock()
+		defer conn.writeBlocker.Unlock()
 
 		hdr := header(make([]byte, headerSize))
 		hdr.encode(typePing, flagACK, 0, 0)
@@ -1458,6 +1462,7 @@ func TestSession_ConnectionWriteTimeout(t *testing.T) {
 
 		conn := client.conn.(*pipeConn)
 		conn.writeBlocker.Lock()
+		defer conn.writeBlocker.Unlock()
 
 		// Since the write goroutine is blocked then this will return a
 		// timeout since it can't get feedback about whether the write

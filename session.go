@@ -68,12 +68,14 @@ type Session struct {
 	// recvDoneCh is closed when recv() exits to avoid a race
 	// between stream registration and stream shutdown
 	recvDoneCh chan struct{}
+	sendDoneCh chan struct{}
 
 	// shutdown is used to safely close a session
-	shutdown     bool
-	shutdownErr  error
-	shutdownCh   chan struct{}
-	shutdownLock sync.Mutex
+	shutdown        bool
+	shutdownErr     error
+	shutdownCh      chan struct{}
+	shutdownLock    sync.Mutex
+	shutdownErrLock sync.Mutex
 }
 
 // sendReady is used to either mark a stream as ready
@@ -103,6 +105,7 @@ func newSession(config *Config, conn io.ReadWriteCloser, client bool) *Session {
 		acceptCh:   make(chan *Stream, config.AcceptBacklog),
 		sendCh:     make(chan sendReady, 64),
 		recvDoneCh: make(chan struct{}),
+		sendDoneCh: make(chan struct{}),
 		shutdownCh: make(chan struct{}),
 	}
 	if client {
@@ -255,10 +258,15 @@ func (s *Session) Close() error {
 		return nil
 	}
 	s.shutdown = true
+
+	s.shutdownErrLock.Lock()
 	if s.shutdownErr == nil {
 		s.shutdownErr = ErrSessionShutdown
 	}
+	s.shutdownErrLock.Unlock()
+
 	close(s.shutdownCh)
+
 	s.conn.Close()
 	<-s.recvDoneCh
 
@@ -267,17 +275,18 @@ func (s *Session) Close() error {
 	for _, stream := range s.streams {
 		stream.forceClose()
 	}
+	<-s.sendDoneCh
 	return nil
 }
 
 // exitErr is used to handle an error that is causing the
 // session to terminate.
 func (s *Session) exitErr(err error) {
-	s.shutdownLock.Lock()
+	s.shutdownErrLock.Lock()
 	if s.shutdownErr == nil {
 		s.shutdownErr = err
 	}
-	s.shutdownLock.Unlock()
+	s.shutdownErrLock.Unlock()
 	s.Close()
 }
 
@@ -420,6 +429,13 @@ func (s *Session) sendNoWait(hdr header) error {
 
 // send is a long running goroutine that sends data
 func (s *Session) send() {
+	if err := s.sendLoop(); err != nil {
+		s.exitErr(err)
+	}
+}
+
+func (s *Session) sendLoop() error {
+	defer close(s.sendDoneCh)
 	for {
 		select {
 		case ready := <-s.sendCh:
@@ -431,8 +447,7 @@ func (s *Session) send() {
 					if err != nil {
 						s.logger.Printf("[ERR] yamux: Failed to write header: %v", err)
 						asyncSendErr(ready.Err, err)
-						s.exitErr(err)
-						return
+						return err
 					}
 					sent += n
 				}
@@ -444,15 +459,14 @@ func (s *Session) send() {
 				if err != nil {
 					s.logger.Printf("[ERR] yamux: Failed to write body: %v", err)
 					asyncSendErr(ready.Err, err)
-					s.exitErr(err)
-					return
+					return err
 				}
 			}
 
 			// No error, successful send
 			asyncSendErr(ready.Err, nil)
 		case <-s.shutdownCh:
-			return
+			return nil
 		}
 	}
 }
