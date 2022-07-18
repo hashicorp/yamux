@@ -2,6 +2,7 @@ package yamux
 
 import (
 	"bufio"
+	"bytes"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -63,7 +64,7 @@ type Session struct {
 
 	// sendCh is used to mark a stream as ready to send,
 	// or to send a header out directly.
-	sendCh chan sendReady
+	sendCh chan *sendReady
 
 	// recvDoneCh is closed when recv() exits to avoid a race
 	// between stream registration and stream shutdown
@@ -82,6 +83,7 @@ type Session struct {
 // or to directly send a header
 type sendReady struct {
 	Hdr  []byte
+	mu   sync.Mutex // Protects Body from unsafe reads.
 	Body []byte
 	Err  chan error
 }
@@ -103,7 +105,7 @@ func newSession(config *Config, conn io.ReadWriteCloser, client bool) *Session {
 		inflight:   make(map[uint32]struct{}),
 		synCh:      make(chan struct{}, config.AcceptBacklog),
 		acceptCh:   make(chan *Stream, config.AcceptBacklog),
-		sendCh:     make(chan sendReady, 64),
+		sendCh:     make(chan *sendReady, 64),
 		recvDoneCh: make(chan struct{}),
 		sendDoneCh: make(chan struct{}),
 		shutdownCh: make(chan struct{}),
@@ -382,7 +384,7 @@ func (s *Session) waitForSendErr(hdr header, body []byte, errCh chan error) erro
 		timerPool.Put(t)
 	}()
 
-	ready := sendReady{Hdr: hdr, Body: body, Err: errCh}
+	ready := &sendReady{Hdr: hdr, Body: body, Err: errCh}
 	select {
 	case s.sendCh <- ready:
 	case <-s.shutdownCh:
@@ -391,12 +393,34 @@ func (s *Session) waitForSendErr(hdr header, body []byte, errCh chan error) erro
 		return ErrConnectionWriteTimeout
 	}
 
+	bodyCopy := func() {
+		if body == nil {
+			return // A nil body is ignored.
+		}
+
+		// In the event of session shutdown or connection write timeout,
+		// we need to prevent `send` from reading the body buffer after
+		// returning from this function since the caller may re-use the
+		// underlying array.
+		ready.mu.Lock()
+		defer ready.mu.Unlock()
+
+		if ready.Body == nil {
+			return // Body was already copied in `send`.
+		}
+		newBody := make([]byte, len(body))
+		copy(newBody, body)
+		ready.Body = newBody
+	}
+
 	select {
 	case err := <-errCh:
 		return err
 	case <-s.shutdownCh:
+		bodyCopy()
 		return ErrSessionShutdown
 	case <-timer.C:
+		bodyCopy()
 		return ErrConnectionWriteTimeout
 	}
 }
@@ -418,7 +442,7 @@ func (s *Session) sendNoWait(hdr header) error {
 	}()
 
 	select {
-	case s.sendCh <- sendReady{Hdr: hdr}:
+	case s.sendCh <- &sendReady{Hdr: hdr}:
 		return nil
 	case <-s.shutdownCh:
 		return ErrSessionShutdown
@@ -436,26 +460,41 @@ func (s *Session) send() {
 
 func (s *Session) sendLoop() error {
 	defer close(s.sendDoneCh)
+	var bodyBuf bytes.Buffer
 	for {
+		bodyBuf.Reset()
+
 		select {
 		case ready := <-s.sendCh:
 			// Send a header if ready
 			if ready.Hdr != nil {
-				sent := 0
-				for sent < len(ready.Hdr) {
-					n, err := s.conn.Write(ready.Hdr[sent:])
-					if err != nil {
-						s.logger.Printf("[ERR] yamux: Failed to write header: %v", err)
-						asyncSendErr(ready.Err, err)
-						return err
-					}
-					sent += n
+				_, err := s.conn.Write(ready.Hdr)
+				if err != nil {
+					s.logger.Printf("[ERR] yamux: Failed to write header: %v", err)
+					asyncSendErr(ready.Err, err)
+					return err
 				}
 			}
 
-			// Send data from a body if given
+			ready.mu.Lock()
 			if ready.Body != nil {
-				_, err := s.conn.Write(ready.Body)
+				// Copy the body into the buffer to avoid
+				// holding a mutex lock during the write.
+				_, err := bodyBuf.Write(ready.Body)
+				if err != nil {
+					ready.Body = nil
+					ready.mu.Unlock()
+					s.logger.Printf("[ERR] yamux: Failed to copy body into buffer: %v", err)
+					asyncSendErr(ready.Err, err)
+					return err
+				}
+				ready.Body = nil
+			}
+			ready.mu.Unlock()
+
+			if bodyBuf.Len() > 0 {
+				// Send data from a body if given
+				_, err := s.conn.Write(bodyBuf.Bytes())
 				if err != nil {
 					s.logger.Printf("[ERR] yamux: Failed to write body: %v", err)
 					asyncSendErr(ready.Err, err)
@@ -653,8 +692,9 @@ func (s *Session) incomingStream(id uint32) error {
 		// Backlog exceeded! RST the stream
 		s.logger.Printf("[WARN] yamux: backlog exceeded, forcing connection reset")
 		delete(s.streams, id)
-		stream.sendHdr.encode(typeWindowUpdate, flagRST, id, 0)
-		return s.sendNoWait(stream.sendHdr)
+		hdr := header(make([]byte, headerSize))
+		hdr.encode(typeWindowUpdate, flagRST, id, 0)
+		return s.sendNoWait(hdr)
 	}
 }
 
