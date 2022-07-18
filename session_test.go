@@ -543,7 +543,6 @@ func TestSendData_Large(t *testing.T) {
 			t.Fatalf("err: %v", err)
 		}
 	}()
-
 	doneCh := make(chan struct{})
 	go func() {
 		wg.Wait()
@@ -551,6 +550,7 @@ func TestSendData_Large(t *testing.T) {
 	}()
 	select {
 	case <-doneCh:
+		return
 	case <-time.After(5 * time.Second):
 		panic("timeout")
 	}
