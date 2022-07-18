@@ -639,8 +639,9 @@ func (s *Session) incomingStream(id uint32) error {
 		// Backlog exceeded! RST the stream
 		s.logger.Printf("[WARN] yamux: backlog exceeded, forcing connection reset")
 		delete(s.streams, id)
-		stream.sendHdr.encode(typeWindowUpdate, flagRST, id, 0)
-		return s.sendNoWait(stream.sendHdr)
+		hdr := header(make([]byte, headerSize))
+		hdr.encode(typeWindowUpdate, flagRST, id, 0)
+		return s.sendNoWait(hdr)
 	}
 }
 
