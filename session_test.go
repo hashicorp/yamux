@@ -278,14 +278,19 @@ func TestAccept(t *testing.T) {
 func TestOpenStreamTimeout(t *testing.T) {
 	const timeout = 25 * time.Millisecond
 
-	cfg := testConf()
-	cfg.StreamOpenTimeout = timeout
+	conn1, conn2 := testConn()
 
-	client, server := testClientServerConfig(cfg)
-	defer client.Close()
+	serverCfg := testConf()
+	serverCfg.StreamOpenTimeout = timeout
+	server, _ := Server(conn2, serverCfg)
 	defer server.Close()
 
-	clientLogs := captureLogs(client)
+	clientLogs := new(logCapture)
+	clientCfg := testConf()
+	clientCfg.LogOutput = clientLogs
+	clientCfg.StreamOpenTimeout = timeout
+	client, _ := Client(conn1, clientCfg)
+	defer client.Close()
 
 	// Open a single stream without a server to acknowledge it.
 	s, err := client.OpenStream()
