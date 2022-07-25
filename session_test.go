@@ -775,6 +775,62 @@ func TestHalfClose(t *testing.T) {
 	}
 }
 
+func TestHalfCloseSessionShutdown(t *testing.T) {
+	client, server := testClientServer()
+	defer client.Close()
+	defer server.Close()
+
+	// dataSize must be large enough to ensure the server will send a window
+	// update
+	dataSize := int64(server.config.MaxStreamWindowSize)
+
+	data := make([]byte, dataSize)
+	for idx := range data {
+		data[idx] = byte(idx % 256)
+	}
+
+	stream, err := client.Open()
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if _, err = stream.Write(data); err != nil {
+		t.Fatalf("err: %v", err)
+	}
+
+	stream2, err := server.Accept()
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+
+	if err := stream.Close(); err != nil {
+		t.Fatalf("err: %v", err)
+	}
+
+	// Shut down the session of the sending side. This should not cause reads
+	// to fail on the receiving side.
+	if err := client.Close(); err != nil {
+		t.Fatalf("err: %v", err)
+	}
+
+	buf := make([]byte, dataSize)
+	n, err := stream2.Read(buf)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if int64(n) != dataSize {
+		t.Fatalf("bad: %v", n)
+	}
+
+	// EOF after close
+	n, err = stream2.Read(buf)
+	if err != io.EOF {
+		t.Fatalf("err: %v", err)
+	}
+	if n != 0 {
+		t.Fatalf("bad: %v", n)
+	}
+}
+
 func TestReadDeadline(t *testing.T) {
 	client, server := testClientServer()
 	defer client.Close()
