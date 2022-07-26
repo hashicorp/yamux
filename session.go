@@ -250,6 +250,11 @@ func (s *Session) AcceptStream() (*Stream, error) {
 	}
 }
 
+// AcceptBacklog returns the number of streams waiting to be "Accept"ed.
+func (s *Session) AcceptBacklog() int {
+	return len(s.acceptCh)
+}
+
 // Close is used to close the session and all streams.
 // Attempts to send a GoAway before closing the connection.
 func (s *Session) Close() error {
