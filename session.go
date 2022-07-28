@@ -34,7 +34,7 @@ type Session struct {
 	config *Config
 
 	// logger is used for our logs
-	logger *log.Logger
+	logger Logger
 
 	// conn is the underlying connection
 	conn io.ReadWriteCloser

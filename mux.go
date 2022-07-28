@@ -3,7 +3,6 @@ package yamux
 import (
 	"fmt"
 	"io"
-	"log"
 	"os"
 	"time"
 )
@@ -51,7 +50,7 @@ type Config struct {
 
 	// Logger is used to pass in the logger to be used. Either Logger or
 	// LogOutput can be set, not both.
-	Logger *log.Logger
+	Logger Logger
 }
 
 // DefaultConfig is used to return a default configuration
