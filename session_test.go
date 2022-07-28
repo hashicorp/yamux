@@ -2,6 +2,7 @@ package yamux
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -1531,6 +1532,33 @@ func TestSession_ConnectionWriteTimeout(t *testing.T) {
 			t.Fatalf("lied about writes: %d", n)
 		}
 	}()
+
+	wg.Wait()
+}
+
+func TestCancelAccept(t *testing.T) {
+	_, server := testClientServer()
+	defer server.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	var wg sync.WaitGroup
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+
+		stream, err := server.AcceptStreamWithContext(ctx)
+		if err != context.Canceled {
+			t.Fatalf("err: %v", err)
+		}
+
+		if stream != nil {
+			defer stream.Close()
+		}
+	}()
+
+	cancel()
 
 	wg.Wait()
 }
