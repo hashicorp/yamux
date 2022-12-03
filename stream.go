@@ -57,6 +57,9 @@ type Stream struct {
 	// closeTimer is set with stateLock held to honor the StreamCloseTimeout
 	// setting on Session.
 	closeTimer *time.Timer
+
+	// closeChan is closed in case of stream being shutdown.
+	closeChan chan struct{}
 }
 
 // newStream is used to construct a new stream within
@@ -75,6 +78,7 @@ func newStream(session *Session, id uint32, state streamState) *Stream {
 		recvNotifyCh: make(chan struct{}, 1),
 		sendNotifyCh: make(chan struct{}, 1),
 		establishCh:  make(chan struct{}, 1),
+		closeChan:    make(chan struct{}, 1),
 	}
 	s.readDeadline.Store(time.Time{})
 	s.writeDeadline.Store(time.Time{})
@@ -106,11 +110,13 @@ START:
 		if s.recvBuf == nil || s.recvBuf.Len() == 0 {
 			s.recvLock.Unlock()
 			s.stateLock.Unlock()
+			s.closeCloseChan()
 			return 0, io.EOF
 		}
 		s.recvLock.Unlock()
 	case streamReset:
 		s.stateLock.Unlock()
+		s.closeCloseChan()
 		return 0, ErrConnectionReset
 	}
 	s.stateLock.Unlock()
@@ -181,9 +187,11 @@ START:
 		fallthrough
 	case streamClosed:
 		s.stateLock.Unlock()
+		s.closeCloseChan()
 		return 0, ErrStreamClosed
 	case streamReset:
 		s.stateLock.Unlock()
+		s.closeCloseChan()
 		return 0, ErrConnectionReset
 	}
 	s.stateLock.Unlock()
@@ -388,7 +396,27 @@ func (s *Stream) forceClose() {
 	s.stateLock.Lock()
 	s.state = streamClosed
 	s.stateLock.Unlock()
+	s.closeCloseChan()
 	s.notifyWaiting()
+}
+
+// CloseChan returns a read-only channel which is closed as
+// soon as the stream is closed. Note that when it is closed,
+// doesn't imply that the buffers are empty too.
+func (s *Stream) CloseChan() <-chan struct{} {
+	return s.closeChan
+}
+
+// IsClosed returns true in case of the stream being closed.
+// Note that when it is closed, doesn't imply that the buffers
+// are empty too.
+func (s *Stream) IsClosed() bool {
+	select {
+	case <-s.closeChan:
+		return true
+	default:
+		return false
+	}
 }
 
 // processFlags is used to update the state of the stream
@@ -399,6 +427,7 @@ func (s *Stream) processFlags(flags uint16) error {
 
 	// Close the stream without holding the state lock
 	closeStream := false
+	closeCloseChan := false
 	defer func() {
 		if closeStream {
 			if s.closeTimer != nil {
@@ -407,6 +436,9 @@ func (s *Stream) processFlags(flags uint16) error {
 			}
 
 			s.session.closeStream(s.id)
+		}
+		if closeCloseChan {
+			s.closeCloseChan()
 		}
 	}()
 
@@ -438,6 +470,7 @@ func (s *Stream) processFlags(flags uint16) error {
 	if flags&flagRST == flagRST {
 		s.state = streamReset
 		closeStream = true
+		closeCloseChan = true
 		s.notifyWaiting()
 	}
 	return nil
@@ -541,4 +574,14 @@ func (s *Stream) Shrink() {
 		s.recvBuf = nil
 	}
 	s.recvLock.Unlock()
+}
+
+// closeCloseChan closes the closeChan, to mark the end of
+// stream lifetime.
+func (s *Stream) closeCloseChan() {
+	select {
+	case <-s.closeChan:
+	default:
+		close(s.closeChan)
+	}
 }
