@@ -369,7 +369,9 @@ SEND_CLOSE:
 	return nil
 }
 
-// CloseWrite is used to close the stream write side
+// CloseWrite is used to close the stream write side.
+// If the remote side has already closed, this will
+// fully close the stream
 func (s *Stream) CloseWrite() error {
 	closeStream := false
 	s.stateLock.Lock()
@@ -401,9 +403,11 @@ SEND_CLOSE:
 
 	s.stateLock.Unlock()
 	s.sendClose()
-	s.notifyWaiting()
 	if closeStream {
+		s.notifyWaiting()
 		s.session.closeStream(s.id)
+	} else {
+		asyncNotify(s.sendNotifyCh)
 	}
 	return nil
 }
