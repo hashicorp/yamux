@@ -20,6 +20,7 @@ const (
 	streamRemoteClose
 	streamClosed
 	streamReset
+	streamCloseWrite
 )
 
 // Stream is used to represent a logical stream
@@ -177,6 +178,8 @@ func (s *Stream) write(b []byte) (n int, err error) {
 START:
 	s.stateLock.Lock()
 	switch s.state {
+	case streamCloseWrite:
+		fallthrough
 	case streamLocalClose:
 		fallthrough
 	case streamClosed:
@@ -366,6 +369,45 @@ SEND_CLOSE:
 	return nil
 }
 
+// CloseWrite is used to close the stream write side
+func (s *Stream) CloseWrite() error {
+	closeStream := false
+	s.stateLock.Lock()
+	switch s.state {
+	// Opened means we need to signal a close
+	case streamSYNSent:
+		fallthrough
+	case streamSYNReceived:
+		fallthrough
+	case streamEstablished:
+		s.state = streamCloseWrite
+		goto SEND_CLOSE
+
+	case streamRemoteClose:
+		s.state = streamClosed
+		closeStream = true
+		goto SEND_CLOSE
+
+	case streamCloseWrite:
+	case streamLocalClose:
+	case streamClosed:
+	case streamReset:
+	default:
+		panic("unhandled state")
+	}
+	s.stateLock.Unlock()
+	return nil
+SEND_CLOSE:
+
+	s.stateLock.Unlock()
+	s.sendClose()
+	s.notifyWaiting()
+	if closeStream {
+		s.session.closeStream(s.id)
+	}
+	return nil
+}
+
 // closeTimeout is called after StreamCloseTimeout during a close to
 // close this stream.
 func (s *Stream) closeTimeout() {
@@ -426,6 +468,8 @@ func (s *Stream) processFlags(flags uint16) error {
 		case streamEstablished:
 			s.state = streamRemoteClose
 			s.notifyWaiting()
+		case streamCloseWrite:
+			fallthrough
 		case streamLocalClose:
 			s.state = streamClosed
 			closeStream = true

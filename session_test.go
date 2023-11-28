@@ -3,6 +3,7 @@ package yamux
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -1561,4 +1562,64 @@ func TestCancelAccept(t *testing.T) {
 	cancel()
 
 	wg.Wait()
+}
+
+func TestCloseWrite(t *testing.T) {
+	client, server := testClientServer()
+	defer client.Close()
+	defer server.Close()
+
+	stream, err := client.OpenStream()
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	defer stream.Close()
+
+	stream2, err := server.Accept()
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	defer stream2.Close()
+
+	if _, err := stream.Write([]byte("hello")); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := stream.CloseWrite(); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := stream.Write([]byte("fail")); !errors.Is(err, ErrStreamClosed) {
+		t.Fatal(err)
+	}
+
+	data, err := io.ReadAll(stream2)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !bytes.Equal(data, []byte("hello")) {
+		t.Fatalf("got data %q, expected %q", data, "hello")
+	}
+
+	if _, err := stream2.Write(data); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := stream2.(interface{ CloseWrite() error }).CloseWrite(); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := stream2.Write([]byte("fail")); !errors.Is(err, ErrStreamClosed) {
+		t.Fatal(err)
+	}
+
+	data2, err := io.ReadAll(stream)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !bytes.Equal(data2, []byte("hello")) {
+		t.Fatalf("got data %q, expected %q", data, "hello")
+	}
 }
