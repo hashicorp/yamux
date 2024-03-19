@@ -325,6 +325,7 @@ func (s *Stream) Close() error {
 		s.state = streamLocalClose
 		goto SEND_CLOSE
 
+	case streamCloseWrite:
 	case streamLocalClose:
 	case streamRemoteClose:
 		s.state = streamClosed
