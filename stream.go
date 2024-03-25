@@ -326,6 +326,10 @@ func (s *Stream) Close() error {
 		goto SEND_CLOSE
 
 	case streamCloseWrite:
+		// If we've already closed the write side, so we just need to
+		// close the read side and transition to streamLocalClose.
+		s.state = streamLocalClose
+		goto CLOSE_WRITE_CLOSE
 	case streamLocalClose:
 	case streamRemoteClose:
 		s.state = streamClosed
@@ -367,6 +371,16 @@ SEND_CLOSE:
 	if closeStream {
 		s.session.closeStream(s.id)
 	}
+	return nil
+
+CLOSE_WRITE_CLOSE:
+	if !closeStream && s.session.config.StreamCloseTimeout > 0 {
+		s.closeTimer = time.AfterFunc(
+			s.session.config.StreamCloseTimeout, s.closeTimeout)
+	}
+
+	s.stateLock.Unlock()
+	s.notifyWaiting()
 	return nil
 }
 
