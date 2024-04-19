@@ -16,8 +16,6 @@ const (
 	streamSYNSent
 	streamSYNReceived
 	streamEstablished
-	streamLocalClose
-	streamRemoteClose
 	streamClosed
 	streamReset
 )
@@ -55,10 +53,6 @@ type Stream struct {
 	establishCh chan struct{}
 
 	closedChan chan struct{}
-
-	// closeTimer is set with stateLock held to honor the StreamCloseTimeout
-	// setting on Session.
-	closeTimer *time.Timer
 }
 
 // newStream is used to construct a new stream within
@@ -356,23 +350,6 @@ func (s *Stream) Close() error {
 	return nil
 }
 
-// closeTimeout is called after StreamCloseTimeout during a close to
-// close this stream.
-func (s *Stream) closeTimeout() {
-	// Close our side forcibly
-	s.forceClose()
-
-	// Free the stream from the session map
-	s.session.closeStream(s.id)
-
-	// Send a RST so the remote side closes too.
-	s.sendLock.Lock()
-	defer s.sendLock.Unlock()
-	hdr := header(make([]byte, headerSize))
-	hdr.encode(typeWindowUpdate, flagRST, s.id, 0)
-	s.session.sendNoWait(hdr)
-}
-
 // forceClose is used for when the session is exiting
 func (s *Stream) forceClose() {
 	s.stateLock.Lock()
@@ -395,11 +372,6 @@ func (s *Stream) processFlags(flags uint16) error {
 	closeStream := false
 	defer func() {
 		if closeStream {
-			if s.closeTimer != nil {
-				// Stop our close timeout timer since we gracefully closed
-				s.closeTimer.Stop()
-			}
-
 			s.session.closeStream(s.id)
 		}
 	}()

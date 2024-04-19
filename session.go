@@ -601,7 +601,7 @@ func (s *Session) handleStreamMessage(hdr header) error {
 			}
 		} /*else { Hint: Just ignore this. The stream might have closed already.
 			s.logger.Printf("[WARN] yamux: frame for missing stream: %v", hdr)
-		}*/
+		} */
 		return nil
 	}
 

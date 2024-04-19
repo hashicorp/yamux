@@ -101,8 +101,8 @@ func BenchmarkSendRecv4096(b *testing.B) {
 }
 
 func BenchmarkSendRecvLarge(b *testing.B) {
-	const sendSize = 512 * 1024 * 1024 // 512 MB
-	const recvSize = 4 * 1024          // 4 KB
+	const sendSize = 512 * 1024 * 1024 //512 MB
+	const recvSize = 4 * 1024          //4 KB
 	benchmarkSendRecv(b, sendSize, recvSize)
 }
 

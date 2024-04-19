@@ -307,7 +307,7 @@ func TestOpenStreamTimeout(t *testing.T) {
 	}
 }
 
-func TestClose_closeTimeout(t *testing.T) {
+/*func TestClose_closeTimeout(t *testing.T) {
 	conf := testConf()
 	conf.StreamCloseTimeout = 10 * time.Millisecond
 	client, server := testClientServerConfig(conf)
@@ -375,7 +375,7 @@ func TestClose_closeTimeout(t *testing.T) {
 	} else if err.Error() != "connection reset" {
 		t.Fatalf("expected connection reset, got %q", err)
 	}
-}
+}*/
 
 func TestNonNilInterface(t *testing.T) {
 	_, server := testClientServer()
@@ -724,8 +724,7 @@ func TestManyStreams_PingPong(t *testing.T) {
 	wg.Wait()
 }
 
-// TODO: Create a TestFullClose
-/* func TestHalfClose(t *testing.T) {
+/*func TestHalfClose(t *testing.T) {
 	client, server := testClientServer()
 	defer client.Close()
 	defer server.Close()
@@ -776,7 +775,7 @@ func TestManyStreams_PingPong(t *testing.T) {
 	if n != 0 {
 		t.Fatalf("bad: %v", n)
 	}
-} */
+}
 
 func TestHalfCloseSessionShutdown(t *testing.T) {
 	client, server := testClientServer()
@@ -832,7 +831,7 @@ func TestHalfCloseSessionShutdown(t *testing.T) {
 	if n != 0 {
 		t.Fatalf("bad: %v", n)
 	}
-}
+}*/
 
 func TestReadDeadline(t *testing.T) {
 	client, server := testClientServer()
