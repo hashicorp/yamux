@@ -1,7 +1,6 @@
 package yamux
 
 import (
-	"context"
 	"io"
 	"io/ioutil"
 	"testing"
@@ -43,7 +42,7 @@ func BenchmarkAccept(b *testing.B) {
 		defer close(doneCh)
 
 		for i := 0; i < b.N; i++ {
-			stream, err := server.AcceptStream(context.Background())
+			stream, err := server.AcceptStream()
 			if err != nil {
 				return
 			}
@@ -125,7 +124,7 @@ func benchmarkSendRecv(b *testing.B, sendSize, recvSize int) {
 	go func() {
 		defer close(doneCh)
 
-		stream, err := server.AcceptStream(context.Background())
+		stream, err := server.AcceptStream()
 		if err != nil {
 			return
 		}
@@ -227,7 +226,7 @@ func benchmarkSendRecvParallel(b *testing.B, sendSize int) {
 		go func() {
 			defer close(doneCh)
 
-			stream, err := server.AcceptStream(context.Background())
+			stream, err := server.AcceptStream()
 			if err != nil {
 				return
 			}
