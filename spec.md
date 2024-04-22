@@ -117,12 +117,12 @@ hard close a stream immediately.
 
 ## Flow Control
 
-When Yamux is initially starts each stream with a 256KB window size.
+When Yamux is initially starts each stream with a 256KiB window size.
 There is no window size for the session.
 
 To prevent the streams from stalling, window update frames should be
 sent regularly. Yamux can be configured to provide a larger limit for
-windows sizes. Both sides assume the initial 256KB window, but can
+windows sizes. Both sides assume the initial 256KiB window, but can
 immediately send a window update as part of the SYN/ACK indicating a
 larger window.
 
