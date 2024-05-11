@@ -4,10 +4,15 @@ import (
 	"io"
 	"io/ioutil"
 	"testing"
+	"time"
 )
 
 func BenchmarkPing(b *testing.B) {
 	client, server := testClientServer()
+  
+	client.conn = &delayedConn{conn: client.conn, writeDelay: 10 * time.Millisecond}
+	server.conn = &delayedConn{conn: server.conn, writeDelay: 10 * time.Millisecond}
+
 	defer func() {
 		client.Close()
 		server.Close()
