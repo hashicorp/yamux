@@ -143,14 +143,15 @@ WAIT:
 		timeout = timer.C
 	}
 	select {
+	case <-s.session.shutdownCh:
 	case <-s.recvNotifyCh:
-		if timer != nil {
-			timer.Stop()
-		}
-		goto START
 	case <-timeout:
 		return 0, ErrTimeout
 	}
+	if timer != nil {
+		timer.Stop()
+	}
+	goto START
 }
 
 // Write is used to write to the stream
@@ -225,11 +226,12 @@ WAIT:
 		timeout = time.After(delay)
 	}
 	select {
+	case <-s.session.shutdownCh:
 	case <-s.sendNotifyCh:
-		goto START
 	case <-timeout:
 		return 0, ErrTimeout
 	}
+	goto START
 }
 
 // sendFlags determines any flags that are appropriate
