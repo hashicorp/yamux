@@ -220,16 +220,21 @@ START:
 
 WAIT:
 	var timeout <-chan time.Time
+	var timer *time.Timer
 	writeDeadline := s.writeDeadline.Load().(time.Time)
 	if !writeDeadline.IsZero() {
 		delay := time.Until(writeDeadline)
-		timeout = time.After(delay)
+		timer = time.NewTimer(delay)
+		timeout = timer.C
 	}
 	select {
 	case <-s.session.shutdownCh:
 	case <-s.sendNotifyCh:
 	case <-timeout:
 		return 0, ErrTimeout
+	}
+	if timer != nil {
+		timer.Stop()
 	}
 	goto START
 }
