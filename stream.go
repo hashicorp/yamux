@@ -149,7 +149,9 @@ WAIT:
 		return 0, ErrTimeout
 	}
 	if timer != nil {
-		timer.Stop()
+		if !timer.Stop() {
+			<-timeout
+		}
 	}
 	goto START
 }
@@ -234,7 +236,9 @@ WAIT:
 		return 0, ErrTimeout
 	}
 	if timer != nil {
-		timer.Stop()
+		if !timer.Stop() {
+			<-timeout
+		}
 	}
 	goto START
 }
