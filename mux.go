@@ -53,6 +53,11 @@ type Config struct {
 	Logger Logger
 }
 
+func (c *Config) Clone() *Config {
+	c2 := *c
+	return &c2
+}
+
 // DefaultConfig is used to return a default configuration
 func DefaultConfig() *Config {
 	return &Config{
