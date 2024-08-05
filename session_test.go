@@ -1201,8 +1201,7 @@ func TestSendData_VeryLarge(t *testing.T) {
 		}()
 	}
 
-	// With the race detector on, this test takes 3-4x longer than this timeout.
-	drainErrorsUntil(t, errCh, workers*2, 60*time.Second, "timeout")
+	drainErrorsUntil(t, errCh, workers*2, 120*time.Second, "timeout")
 }
 
 func TestBacklogExceeded_Accept(t *testing.T) {
