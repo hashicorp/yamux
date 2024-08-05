@@ -444,7 +444,7 @@ func TestSendData_Small(t *testing.T) {
 
 func TestSendData_Large(t *testing.T) {
 	if testing.Short() {
-		t.Skip("skipping slow test that times out on the race detector")
+		t.Skip("skipping slow test that may time out on the race detector")
 	}
 	client, server := testClientServer(t)
 
@@ -520,7 +520,7 @@ func TestSendData_Large(t *testing.T) {
 		errCh <- nil
 	}()
 
-	drainErrorsUntil(t, errCh, 2, time.Second, "timeout")
+	drainErrorsUntil(t, errCh, 2, 10*time.Second, "timeout")
 }
 
 func TestGoAway(t *testing.T) {
@@ -1129,7 +1129,7 @@ func (u *UnlimitedReader) Read(p []byte) (int, error) {
 
 func TestSendData_VeryLarge(t *testing.T) {
 	if testing.Short() {
-		t.Skip("skipping slow test that times out on the race detector")
+		t.Skip("skipping slow test that may time out on the race detector")
 	}
 	client, server := testClientServer(t)
 
@@ -1202,7 +1202,7 @@ func TestSendData_VeryLarge(t *testing.T) {
 	}
 
 	// With the race detector on, this test takes 3-4x longer than this timeout.
-	drainErrorsUntil(t, errCh, workers*2, 20*time.Second, "timeout")
+	drainErrorsUntil(t, errCh, workers*2, 60*time.Second, "timeout")
 }
 
 func TestBacklogExceeded_Accept(t *testing.T) {
