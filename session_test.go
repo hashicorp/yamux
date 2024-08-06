@@ -351,12 +351,12 @@ func TestNonNilInterface(t *testing.T) {
 		t.Fatal("bad: accept should return a shutdown error and a connection of nil value")
 	}
 	if err != nil && conn != nil {
-		t.Fatal("bad: accept should return a connection of nil value")
+		t.Error("bad: accept should return a connection of nil value")
 	}
 
 	conn, err = server.Open()
 	if err == nil || !errors.Is(err, ErrSessionShutdown) || conn != nil {
-		t.Fatal("bad: accept should return a shutdown error and a connection of nil value")
+		t.Fatal("bad: open should return a shutdown error and a connection of nil value")
 	}
 }
 
