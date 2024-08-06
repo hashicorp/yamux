@@ -138,7 +138,7 @@ WAIT:
 	var timer *time.Timer
 	readDeadline := s.readDeadline.Load().(time.Time)
 	if !readDeadline.IsZero() {
-		delay := readDeadline.Sub(time.Now())
+		delay := time.Until(readDeadline)
 		timer = time.NewTimer(delay)
 		timeout = timer.C
 	}
@@ -221,7 +221,7 @@ WAIT:
 	var timeout <-chan time.Time
 	writeDeadline := s.writeDeadline.Load().(time.Time)
 	if !writeDeadline.IsZero() {
-		delay := writeDeadline.Sub(time.Now())
+		delay := time.Until(writeDeadline)
 		timeout = time.After(delay)
 	}
 	select {
@@ -230,7 +230,6 @@ WAIT:
 	case <-timeout:
 		return 0, ErrTimeout
 	}
-	return 0, nil
 }
 
 // sendFlags determines any flags that are appropriate
@@ -380,7 +379,7 @@ func (s *Stream) closeTimeout() {
 	defer s.sendLock.Unlock()
 	hdr := header(make([]byte, headerSize))
 	hdr.encode(typeWindowUpdate, flagRST, s.id, 0)
-	s.session.sendNoWait(hdr)
+	_ = s.session.sendNoWait(hdr)
 }
 
 // forceClose is used for when the session is exiting

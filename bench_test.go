@@ -1,17 +1,13 @@
 package yamux
 
 import (
+	"fmt"
 	"io"
-	"io/ioutil"
 	"testing"
 )
 
 func BenchmarkPing(b *testing.B) {
-	client, server := testClientServer()
-	defer func() {
-		client.Close()
-		server.Close()
-	}()
+	client, _ := testClientServer(b)
 
 	b.ReportAllocs()
 	b.ResetTimer()
@@ -28,11 +24,7 @@ func BenchmarkPing(b *testing.B) {
 }
 
 func BenchmarkAccept(b *testing.B) {
-	client, server := testClientServer()
-	defer func() {
-		client.Close()
-		server.Close()
-	}()
+	client, server := testClientServer(b)
 
 	doneCh := make(chan struct{})
 	b.ReportAllocs()
@@ -107,25 +99,20 @@ func BenchmarkSendRecvLarge(b *testing.B) {
 }
 
 func benchmarkSendRecv(b *testing.B, sendSize, recvSize int) {
-	client, server := testClientServer()
-	defer func() {
-		client.Close()
-		server.Close()
-	}()
+	client, server := testClientServer(b)
 
 	sendBuf := make([]byte, sendSize)
 	recvBuf := make([]byte, recvSize)
-	doneCh := make(chan struct{})
+	errCh := make(chan error, 1)
 
 	b.SetBytes(int64(sendSize))
 	b.ReportAllocs()
 	b.ResetTimer()
 
 	go func() {
-		defer close(doneCh)
-
 		stream, err := server.AcceptStream()
 		if err != nil {
+			errCh <- err
 			return
 		}
 		defer stream.Close()
@@ -134,23 +121,27 @@ func benchmarkSendRecv(b *testing.B, sendSize, recvSize int) {
 		case sendSize == recvSize:
 			for i := 0; i < b.N; i++ {
 				if _, err := stream.Read(recvBuf); err != nil {
-					b.Fatalf("err: %v", err)
+					errCh <- err
+					return
 				}
 			}
 
 		case recvSize > sendSize:
-			b.Fatalf("bad test case; recvSize was: %d and sendSize was: %d, but recvSize must be <= sendSize!", recvSize, sendSize)
+			errCh <- fmt.Errorf("bad test case; recvSize was: %d and sendSize was: %d, but recvSize must be <= sendSize!", recvSize, sendSize)
+			return
 
 		default:
 			chunks := sendSize / recvSize
 			for i := 0; i < b.N; i++ {
 				for j := 0; j < chunks; j++ {
 					if _, err := stream.Read(recvBuf); err != nil {
-						b.Fatalf("err: %v", err)
+						errCh <- err
+						return
 					}
 				}
 			}
 		}
+		errCh <- nil
 	}()
 
 	stream, err := client.Open()
@@ -164,7 +155,8 @@ func benchmarkSendRecv(b *testing.B, sendSize, recvSize int) {
 			b.Fatalf("err: %v", err)
 		}
 	}
-	<-doneCh
+
+	drainErrorsUntil(b, errCh, 1, 0, "")
 }
 
 func BenchmarkSendRecvParallel32(b *testing.B) {
@@ -208,33 +200,29 @@ func BenchmarkSendRecvParallel4096(b *testing.B) {
 }
 
 func benchmarkSendRecvParallel(b *testing.B, sendSize int) {
-	client, server := testClientServer()
-	defer func() {
-		client.Close()
-		server.Close()
-	}()
+	client, server := testClientServer(b)
 
 	sendBuf := make([]byte, sendSize)
-	discarder := ioutil.Discard.(io.ReaderFrom)
+	discarder := io.Discard.(io.ReaderFrom)
 	b.SetBytes(int64(sendSize))
 	b.ReportAllocs()
 	b.ResetTimer()
 
 	b.RunParallel(func(pb *testing.PB) {
-		doneCh := make(chan struct{})
-
+		errCh := make(chan error, 1)
 		go func() {
-			defer close(doneCh)
-
 			stream, err := server.AcceptStream()
 			if err != nil {
+				errCh <- err
 				return
 			}
 			defer stream.Close()
 
 			if _, err := discarder.ReadFrom(stream); err != nil {
-				b.Fatalf("err: %v", err)
+				errCh <- err
+				return
 			}
+			errCh <- nil
 		}()
 
 		stream, err := client.Open()
@@ -249,6 +237,7 @@ func benchmarkSendRecvParallel(b *testing.B, sendSize int) {
 		}
 
 		stream.Close()
-		<-doneCh
+
+		drainErrorsUntil(b, errCh, 1, 0, "")
 	})
 }
