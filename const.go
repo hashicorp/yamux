@@ -54,7 +54,8 @@ var (
 
 		// Error should meet net.Error interface for timeouts for compatability
 		// with standard library expectations, such as http servers.
-		timeout: true,
+		timeout:   true,
+		temporary: true,
 	}
 
 	// ErrStreamClosed is returned when using a closed stream
