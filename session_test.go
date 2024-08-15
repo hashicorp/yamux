@@ -754,25 +754,27 @@ func TestManyStreams_PingPong(t *testing.T) {
 	drainErrorsUntil(t, errCh, 2*streams, 0, "")
 }
 
+// TestHalfClose asserts that half closed streams can still read.
 func TestHalfClose(t *testing.T) {
 	client, server := testClientServer(t)
 
-	stream, err := client.Open()
+	clientStream, err := client.Open()
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
-	if _, err = stream.Write([]byte("a")); err != nil {
+	if _, err = clientStream.Write([]byte("a")); err != nil {
 		t.Fatalf("err: %v", err)
 	}
 
-	stream2, err := server.Accept()
+	serverStream, err := server.Accept()
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
-	stream2.Close() // Half close
+	serverStream.Close() // Half close
 
+	// Server reads 1 byte written by Client
 	buf := make([]byte, 4)
-	n, err := stream2.Read(buf)
+	n, err := serverStream.Read(buf)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -781,13 +783,14 @@ func TestHalfClose(t *testing.T) {
 	}
 
 	// Send more
-	if _, err = stream.Write([]byte("bcd")); err != nil {
+	if _, err = clientStream.Write([]byte("bcd")); err != nil {
 		t.Fatalf("err: %v", err)
 	}
-	stream.Close()
+	clientStream.Close()
 
-	// Read after close
-	n, err = stream2.Read(buf)
+	// Read after close always returns the bytes written but may or may not
+	// receive the EOF.
+	n, err = serverStream.Read(buf)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -796,7 +799,7 @@ func TestHalfClose(t *testing.T) {
 	}
 
 	// EOF after close
-	n, err = stream2.Read(buf)
+	n, err = serverStream.Read(buf)
 	if err != io.EOF {
 		t.Fatalf("err: %v", err)
 	}
