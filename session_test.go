@@ -1361,6 +1361,8 @@ func TestSession_WindowUpdateWriteDuringRead(t *testing.T) {
 	drainErrorsUntil(t, errCh, 2, 0, "")
 }
 
+// TestSession_PartialReadWindowUpdate asserts that when a client performs a
+// partial read it updates the server's send window.
 func TestSession_PartialReadWindowUpdate(t *testing.T) {
 	conf := testConfNoKeepAlive()
 
@@ -1413,13 +1415,20 @@ func TestSession_PartialReadWindowUpdate(t *testing.T) {
 
 	drainErrorsUntil(t, errCh, 1, 0, "")
 
-	_, err = stream.Read(make([]byte, flood/2+1))
+	// Only read part of the flood
+	partialReadSize := flood/2 + 1
+	_, err = stream.Read(make([]byte, partialReadSize))
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
 
+	// Wait for window update to be applied by server. Should be "instant" but CI
+	// can be slow.
+	time.Sleep(2 * time.Second)
+
+	// Assert server received window update
 	window := atomic.LoadUint32(&wr.sendWindow)
-	if exp := uint32(flood/2 + 1); window != exp {
+	if exp := uint32(partialReadSize); window != exp {
 		t.Fatalf("sendWindow: exp=%d, got=%d", exp, window)
 	}
 }
@@ -1624,6 +1633,8 @@ func TestCancelAccept(t *testing.T) {
 	drainErrorsUntil(t, errCh, 1, 0, "")
 }
 
+// drainErrorsUntil receives `expect` errors from errCh within `timeout`. Fails
+// on any non-nil errors.
 func drainErrorsUntil(t testing.TB, errCh chan error, expect int, timeout time.Duration, msg string) {
 	t.Helper()
 	start := time.Now()
