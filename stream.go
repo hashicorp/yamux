@@ -95,10 +95,12 @@ func (s *Stream) StreamID() uint32 {
 func (s *Stream) Read(b []byte) (n int, err error) {
 	defer asyncNotify(s.recvNotifyCh)
 START:
+
+	// If the stream is closed and there's no data buffered, return EOF
 	s.stateLock.Lock()
 	switch s.state {
 	case streamLocalClose:
-		fallthrough
+		// LocalClose only prohibits further local writes. Handle reads normally.
 	case streamRemoteClose:
 		fallthrough
 	case streamClosed:
