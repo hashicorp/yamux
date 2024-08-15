@@ -318,8 +318,20 @@ func TestOpenStreamTimeout(t *testing.T) {
 	// Since no ACKs are received, the stream and session should be closed.
 	time.Sleep(timeout * 5)
 
-	if !clientLogs.match([]string{"[ERR] yamux: aborted stream open (destination=yamux:remote): i/o deadline reached"}) {
-		t.Fatalf("server log incorect: %v", clientLogs.logs())
+	// Support multiple underlying connection types
+	var dest string
+	switch conn := client.conn.(type) {
+	case net.Conn:
+		dest = conn.RemoteAddr().String()
+	case *pipeConn:
+		dest = "yamux:remote"
+	default:
+		t.Fatalf("unsupported connection type %T - please update test", conn)
+	}
+	exp := fmt.Sprintf("[ERR] yamux: aborted stream open (destination=%s): i/o deadline reached", dest)
+
+	if !clientLogs.match([]string{exp}) {
+		t.Fatalf("server log incorect: %v\nexpected: %v", clientLogs.logs(), exp)
 	}
 
 	s.stateLock.Lock()
