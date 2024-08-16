@@ -68,14 +68,52 @@ func (p *pipeConn) Close() error {
 	return p.writer.Close()
 }
 
-func testConn(t testing.TB) (io.ReadWriteCloser, io.ReadWriteCloser) {
-	/*
-		read1, write1 := io.Pipe()
-		read2, write2 := io.Pipe()
-		conn1 := &pipeConn{reader: read1, writer: write2}
-		conn2 := &pipeConn{reader: read2, writer: write1}
-	*/
+func testConnPipe(testing.TB) (io.ReadWriteCloser, io.ReadWriteCloser) {
+	read1, write1 := io.Pipe()
+	read2, write2 := io.Pipe()
+	conn1 := &pipeConn{reader: read1, writer: write2}
+	conn2 := &pipeConn{reader: read2, writer: write1}
+	return conn1, conn2
+}
 
+func testConnTCP(t testing.TB) (io.ReadWriteCloser, io.ReadWriteCloser) {
+	l, err := net.ListenTCP("tcp", nil)
+	if err != nil {
+		t.Fatalf("error creating listener: %v", err)
+	}
+	t.Cleanup(func() { _ = l.Close() })
+
+	network := l.Addr().Network()
+	addr := l.Addr().String()
+
+	var server net.Conn
+	errCh := make(chan error, 1)
+	go func() {
+		defer close(errCh)
+		var err error
+		server, err = l.Accept()
+		if err != nil {
+			errCh <- err
+			return
+		}
+	}()
+
+	t.Logf("Connecting to %s: %s", network, addr)
+	client, err := net.DialTimeout(network, addr, 10*time.Second)
+	if err != nil {
+		t.Fatalf("error dialing tls listener: %v", err)
+	}
+	t.Cleanup(func() { _ = client.Close() })
+
+	if err := <-errCh; err != nil {
+		t.Fatalf("error creating tls server: %v", err)
+	}
+	t.Cleanup(func() { _ = server.Close() })
+
+	return client, server
+}
+
+func testConnTLS(t testing.TB) (io.ReadWriteCloser, io.ReadWriteCloser) {
 	cert, err := tls.LoadX509KeyPair("testdata/cert.pem", "testdata/key.pem")
 	if err != nil {
 		t.Fatalf("error loading certificate: %v", err)
@@ -85,7 +123,7 @@ func testConn(t testing.TB) (io.ReadWriteCloser, io.ReadWriteCloser) {
 	if err != nil {
 		t.Fatalf("error creating listener: %v", err)
 	}
-	t.Cleanup(func() { l.Close() })
+	t.Cleanup(func() { _ = l.Close() })
 
 	var srv net.Conn
 	errCh := make(chan error, 1)
@@ -107,7 +145,7 @@ func testConn(t testing.TB) (io.ReadWriteCloser, io.ReadWriteCloser) {
 	if err != nil {
 		t.Fatalf("error dialing tls listener: %v", err)
 	}
-	t.Cleanup(func() { client.Close() })
+	t.Cleanup(func() { _ = client.Close() })
 
 	tlsClient := tls.Client(client, &tls.Config{
 		// InsecureSkipVerify is safe to use here since this is only for tests.
@@ -117,9 +155,63 @@ func testConn(t testing.TB) (io.ReadWriteCloser, io.ReadWriteCloser) {
 	if err := <-errCh; err != nil {
 		t.Fatalf("error creating tls server: %v", err)
 	}
-	t.Cleanup(func() { srv.Close() })
+	t.Cleanup(func() { _ = srv.Close() })
 
-	return srv, tlsClient
+	return tlsClient, srv
+}
+
+// connTypeFunc is func that returns a client and server connection for testing
+// like testConnTLS.
+//
+// See connTypeTest
+type connTypeFunc func(t testing.TB) (io.ReadWriteCloser, io.ReadWriteCloser)
+
+// connTypeTest is a test case for a specific conn type.
+//
+// See testConnType
+type connTypeTest struct {
+	Name  string
+	Conns connTypeFunc
+}
+
+// testConnType runs subtests of the given testFunc against multiple connection
+// types.
+func testConnTypes(t *testing.T, testFunc func(t testing.TB, client, server io.ReadWriteCloser)) {
+	reverse := func(f connTypeFunc) connTypeFunc {
+		return func(t testing.TB) (io.ReadWriteCloser, io.ReadWriteCloser) {
+			c, s := f(t)
+			return s, c
+		}
+	}
+	cases := []connTypeTest{
+		{
+			Name:  "Pipes",
+			Conns: testConnPipe,
+		},
+		{
+			Name:  "TCP",
+			Conns: testConnTCP,
+		},
+		{
+			Name:  "TCP_Reverse",
+			Conns: reverse(testConnTCP),
+		},
+		{
+			Name:  "TLS",
+			Conns: testConnTLS,
+		},
+		{
+			Name:  "TLS_Reverse",
+			Conns: reverse(testConnTLS),
+		},
+	}
+	for i := range cases {
+		tc := cases[i]
+		t.Run(tc.Name, func(t *testing.T) {
+			client, server := tc.Conns(t)
+			testFunc(t, client, server)
+		})
+	}
 }
 
 func testConf() *Config {
@@ -144,24 +236,30 @@ func testConfNoKeepAlive() *Config {
 }
 
 func testClientServer(t testing.TB) (*Session, *Session) {
-	return testClientServerConfig(t, testConf(), testConf())
+	client, server := testConnTLS(t)
+	return testClientServerConfig(t, client, server, testConf(), testConf())
 }
 
-func testClientServerConfig(t testing.TB, serverConf, clientConf *Config) (*Session, *Session) {
-	conn1, conn2 := testConn(t)
+func testClientServerConfig(
+	t testing.TB,
+	clientConn, serverConn io.ReadWriteCloser,
+	clientConf, serverConf *Config,
+) (clientSession *Session, serverSession *Session) {
 
-	client, err := Client(conn1, clientConf)
+	var err error
+
+	clientSession, err = Client(clientConn, clientConf)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
-	t.Cleanup(func() { _ = client.Close() })
+	t.Cleanup(func() { _ = clientSession.Close() })
 
-	server, err := Server(conn2, serverConf)
+	serverSession, err = Server(serverConn, serverConf)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
-	t.Cleanup(func() { _ = server.Close() })
-	return client, server
+	t.Cleanup(func() { _ = serverSession.Close() })
+	return clientSession, serverSession
 }
 
 func TestPing(t *testing.T) {
@@ -185,9 +283,9 @@ func TestPing(t *testing.T) {
 }
 
 func TestPing_Timeout(t *testing.T) {
-	t.Skip("FIXME: expects a pipe")
 	conf := testConfNoKeepAlive()
-	client, server := testClientServerConfig(t, conf.Clone(), conf.Clone())
+	clientPipe, serverPipe := testConnPipe(t)
+	client, server := testClientServerConfig(t, clientPipe, serverPipe, conf.Clone(), conf.Clone())
 
 	// Prevent the client from responding
 	clientConn := client.conn.(*pipeConn)
@@ -227,38 +325,40 @@ func TestPing_Timeout(t *testing.T) {
 }
 
 func TestCloseBeforeAck(t *testing.T) {
-	cfg := testConf()
-	cfg.AcceptBacklog = 8
-	client, server := testClientServerConfig(t, cfg, cfg.Clone())
+	testConnTypes(t, func(t testing.TB, clientConn, serverConn io.ReadWriteCloser) {
+		cfg := testConf()
+		cfg.AcceptBacklog = 8
+		client, server := testClientServerConfig(t, clientConn, serverConn, cfg, cfg.Clone())
 
-	for i := 0; i < 8; i++ {
-		s, err := client.OpenStream()
-		if err != nil {
-			t.Fatal(err)
+		for i := 0; i < 8; i++ {
+			s, err := client.OpenStream()
+			if err != nil {
+				t.Fatal(err)
+			}
+			s.Close()
 		}
-		s.Close()
-	}
 
-	for i := 0; i < 8; i++ {
-		s, err := server.AcceptStream()
-		if err != nil {
-			t.Fatal(err)
+		for i := 0; i < 8; i++ {
+			s, err := server.AcceptStream()
+			if err != nil {
+				t.Fatal(err)
+			}
+			s.Close()
 		}
-		s.Close()
-	}
 
-	errCh := make(chan error, 1)
-	go func() {
-		s, err := client.OpenStream()
-		if err != nil {
-			errCh <- err
-			return
-		}
-		s.Close()
-		errCh <- nil
-	}()
+		errCh := make(chan error, 1)
+		go func() {
+			s, err := client.OpenStream()
+			if err != nil {
+				errCh <- err
+				return
+			}
+			s.Close()
+			errCh <- nil
+		}()
 
-	drainErrorsUntil(t, errCh, 1, time.Second*5, "timed out trying to open stream")
+		drainErrorsUntil(t, errCh, 1, time.Second*5, "timed out trying to open stream")
+	})
 }
 
 func TestAccept(t *testing.T) {
@@ -300,56 +400,59 @@ func TestAccept(t *testing.T) {
 func TestOpenStreamTimeout(t *testing.T) {
 	const timeout = 25 * time.Millisecond
 
-	serverConf := testConf()
-	serverConf.StreamOpenTimeout = timeout
+	testConnTypes(t, func(t testing.TB, clientConn, serverConn io.ReadWriteCloser) {
+		serverConf := testConf()
+		serverConf.StreamOpenTimeout = timeout
 
-	clientConf := serverConf.Clone()
-	clientLogs := captureLogs(clientConf)
+		clientConf := serverConf.Clone()
+		clientLogs := captureLogs(clientConf)
 
-	client, _ := testClientServerConfig(t, serverConf, clientConf)
+		client, _ := testClientServerConfig(t, clientConn, serverConn, clientConf, serverConf)
 
-	// Open a single stream without a server to acknowledge it.
-	s, err := client.OpenStream()
-	if err != nil {
-		t.Fatal(err)
-	}
+		// Open a single stream without a server to acknowledge it.
+		s, err := client.OpenStream()
+		if err != nil {
+			t.Fatal(err)
+		}
 
-	// Sleep for longer than the stream open timeout.
-	// Since no ACKs are received, the stream and session should be closed.
-	time.Sleep(timeout * 5)
+		// Sleep for longer than the stream open timeout.
+		// Since no ACKs are received, the stream and session should be closed.
+		time.Sleep(timeout * 5)
 
-	// Support multiple underlying connection types
-	var dest string
-	switch conn := client.conn.(type) {
-	case net.Conn:
-		dest = conn.RemoteAddr().String()
-	case *pipeConn:
-		dest = "yamux:remote"
-	default:
-		t.Fatalf("unsupported connection type %T - please update test", conn)
-	}
-	exp := fmt.Sprintf("[ERR] yamux: aborted stream open (destination=%s): i/o deadline reached", dest)
+		// Support multiple underlying connection types
+		var dest string
+		switch conn := clientConn.(type) {
+		case net.Conn:
+			dest = conn.RemoteAddr().String()
+		case *pipeConn:
+			dest = "yamux:remote"
+		default:
+			t.Fatalf("unsupported connection type %T - please update test", conn)
+		}
+		exp := fmt.Sprintf("[ERR] yamux: aborted stream open (destination=%s): i/o deadline reached", dest)
 
-	if !clientLogs.match([]string{exp}) {
-		t.Fatalf("server log incorect: %v\nexpected: %v", clientLogs.logs(), exp)
-	}
+		if !clientLogs.match([]string{exp}) {
+			t.Fatalf("server log incorect: %v\nexpected: %v", clientLogs.logs(), exp)
+		}
 
-	s.stateLock.Lock()
-	state := s.state
-	s.stateLock.Unlock()
+		s.stateLock.Lock()
+		state := s.state
+		s.stateLock.Unlock()
 
-	if state != streamClosed {
-		t.Fatalf("stream should have been closed")
-	}
-	if !client.IsClosed() {
-		t.Fatalf("session should have been closed")
-	}
+		if state != streamClosed {
+			t.Fatalf("stream should have been closed")
+		}
+		if !client.IsClosed() {
+			t.Fatalf("session should have been closed")
+		}
+	})
 }
 
 func TestClose_closeTimeout(t *testing.T) {
 	conf := testConf()
 	conf.StreamCloseTimeout = 10 * time.Millisecond
-	client, server := testClientServerConfig(t, conf, conf.Clone())
+	clientConn, serverConn := testConnTLS(t)
+	client, server := testClientServerConfig(t, clientConn, serverConn, conf, conf.Clone())
 
 	if client.NumStreams() != 0 {
 		t.Fatalf("bad")
@@ -420,11 +523,13 @@ func TestNonNilInterface(t *testing.T) {
 	}
 }
 
+// TestSendData_Small asserts that
 func TestSendData_Small(t *testing.T) {
 	client, server := testClientServer(t)
 
 	errCh := make(chan error, 2)
 
+	// Accept an incoming client and perform some reads before closing
 	go func() {
 		stream, err := server.AcceptStream()
 		if err != nil {
@@ -461,6 +566,7 @@ func TestSendData_Small(t *testing.T) {
 		errCh <- nil
 	}()
 
+	// Open a client and perform some writes before closing
 	go func() {
 		stream, err := client.Open()
 		if err != nil {
@@ -492,7 +598,10 @@ func TestSendData_Small(t *testing.T) {
 		errCh <- nil
 	}()
 
-	drainErrorsUntil(t, errCh, 2, time.Second, "timeout")
+	drainErrorsUntil(t, errCh, 2, 5*time.Second, "timeout")
+
+	// Give client and server a second to receive FINs and close streams
+	time.Sleep(time.Second)
 
 	if n := client.NumStreams(); n != 0 {
 		t.Errorf("expected 0 client streams but found %d", n)
@@ -1082,27 +1191,29 @@ func TestBacklogExceeded(t *testing.T) {
 }
 
 func TestKeepAlive(t *testing.T) {
-	client, server := testClientServer(t)
+	testConnTypes(t, func(t testing.TB, clientConn, serverConn io.ReadWriteCloser) {
+		client, server := testClientServerConfig(t, clientConn, serverConn, testConf(), testConf())
 
-	time.Sleep(200 * time.Millisecond)
+		// Give keepalives time to happen
+		time.Sleep(200 * time.Millisecond)
 
-	// Ping value should increase
-	client.pingLock.Lock()
-	defer client.pingLock.Unlock()
-	if client.pingID == 0 {
-		t.Fatalf("should ping")
-	}
+		// Ping value should increase
+		client.pingLock.Lock()
+		defer client.pingLock.Unlock()
+		if client.pingID == 0 {
+			t.Fatalf("should ping")
+		}
 
-	server.pingLock.Lock()
-	defer server.pingLock.Unlock()
-	if server.pingID == 0 {
-		t.Fatalf("should ping")
-	}
+		server.pingLock.Lock()
+		defer server.pingLock.Unlock()
+		if server.pingID == 0 {
+			t.Fatalf("should ping")
+		}
+	})
 }
 
 func TestKeepAlive_Timeout(t *testing.T) {
-	t.Skip("FIXME: expects a pipe")
-	conn1, conn2 := testConn(t)
+	conn1, conn2 := testConnPipe(t)
 
 	clientConf := testConf()
 	clientConf.ConnectionWriteTimeout = time.Hour // We're testing keep alives, not connection writes
@@ -1156,7 +1267,8 @@ func TestLargeWindow(t *testing.T) {
 	conf := DefaultConfig()
 	conf.MaxStreamWindowSize *= 2
 
-	client, server := testClientServerConfig(t, conf, conf.Clone())
+	clientConn, serverConn := testConnTLS(t)
+	client, server := testClientServerConfig(t, clientConn, serverConn, conf, conf.Clone())
 
 	stream, err := client.Open()
 	if err != nil {
@@ -1303,10 +1415,10 @@ func TestBacklogExceeded_Accept(t *testing.T) {
 }
 
 func TestSession_WindowUpdateWriteDuringRead(t *testing.T) {
-	t.Skip("FIXME: expects a pipe")
 	conf := testConfNoKeepAlive()
 
-	client, server := testClientServerConfig(t, conf, conf.Clone())
+	clientConn, serverConn := testConnPipe(t)
+	client, server := testClientServerConfig(t, clientConn, serverConn, conf, conf.Clone())
 
 	// Choose a huge flood size that we know will result in a window update.
 	flood := int64(client.config.MaxStreamWindowSize) - 1
@@ -1345,7 +1457,7 @@ func TestSession_WindowUpdateWriteDuringRead(t *testing.T) {
 		}
 		defer stream.Close()
 
-		conn := client.conn.(*pipeConn)
+		conn := clientConn.(*pipeConn)
 		conn.writeBlocker.Lock()
 		defer conn.writeBlocker.Unlock()
 
@@ -1364,80 +1476,82 @@ func TestSession_WindowUpdateWriteDuringRead(t *testing.T) {
 // TestSession_PartialReadWindowUpdate asserts that when a client performs a
 // partial read it updates the server's send window.
 func TestSession_PartialReadWindowUpdate(t *testing.T) {
-	conf := testConfNoKeepAlive()
+	testConnTypes(t, func(t testing.TB, clientConn, serverConn io.ReadWriteCloser) {
+		conf := testConfNoKeepAlive()
 
-	client, server := testClientServerConfig(t, conf, conf.Clone())
+		client, server := testClientServerConfig(t, clientConn, serverConn, conf, conf.Clone())
 
-	errCh := make(chan error, 1)
+		errCh := make(chan error, 1)
 
-	// Choose a huge flood size that we know will result in a window update.
-	flood := int64(client.config.MaxStreamWindowSize)
-	var wr *Stream
+		// Choose a huge flood size that we know will result in a window update.
+		flood := int64(client.config.MaxStreamWindowSize)
+		var wr *Stream
 
-	// The server will accept a new stream and then flood data to it.
-	go func() {
-		var err error
-		wr, err = server.AcceptStream()
-		if err != nil {
+		// The server will accept a new stream and then flood data to it.
+		go func() {
+			var err error
+			wr, err = server.AcceptStream()
+			if err != nil {
+				errCh <- err
+				return
+			}
+			defer wr.Close()
+
+			window := atomic.LoadUint32(&wr.sendWindow)
+			if window != client.config.MaxStreamWindowSize {
+				errCh <- fmt.Errorf("sendWindow: exp=%d, got=%d", client.config.MaxStreamWindowSize, window)
+				return
+			}
+
+			n, err := wr.Write(make([]byte, flood))
+			if err != nil {
+				errCh <- err
+				return
+			}
+			if int64(n) != flood {
+				errCh <- fmt.Errorf("short write: %d", n)
+				return
+			}
+			window = atomic.LoadUint32(&wr.sendWindow)
+			if window != 0 {
+				errCh <- fmt.Errorf("sendWindow: exp=%d, got=%d", 0, window)
+				return
+			}
 			errCh <- err
-			return
-		}
-		defer wr.Close()
+		}()
 
+		stream, err := client.OpenStream()
+		if err != nil {
+			t.Fatalf("err: %v", err)
+		}
+		defer stream.Close()
+
+		drainErrorsUntil(t, errCh, 1, 0, "")
+
+		// Only read part of the flood
+		partialReadSize := flood/2 + 1
+		_, err = stream.Read(make([]byte, partialReadSize))
+		if err != nil {
+			t.Fatalf("err: %v", err)
+		}
+
+		// Wait for window update to be applied by server. Should be "instant" but CI
+		// can be slow.
+		time.Sleep(2 * time.Second)
+
+		// Assert server received window update
 		window := atomic.LoadUint32(&wr.sendWindow)
-		if window != client.config.MaxStreamWindowSize {
-			errCh <- fmt.Errorf("sendWindow: exp=%d, got=%d", client.config.MaxStreamWindowSize, window)
-			return
+		if exp := uint32(partialReadSize); window != exp {
+			t.Fatalf("sendWindow: exp=%d, got=%d", exp, window)
 		}
-
-		n, err := wr.Write(make([]byte, flood))
-		if err != nil {
-			errCh <- err
-			return
-		}
-		if int64(n) != flood {
-			errCh <- fmt.Errorf("short write: %d", n)
-			return
-		}
-		window = atomic.LoadUint32(&wr.sendWindow)
-		if window != 0 {
-			errCh <- fmt.Errorf("sendWindow: exp=%d, got=%d", 0, window)
-			return
-		}
-		errCh <- err
-	}()
-
-	stream, err := client.OpenStream()
-	if err != nil {
-		t.Fatalf("err: %v", err)
-	}
-	defer stream.Close()
-
-	drainErrorsUntil(t, errCh, 1, 0, "")
-
-	// Only read part of the flood
-	partialReadSize := flood/2 + 1
-	_, err = stream.Read(make([]byte, partialReadSize))
-	if err != nil {
-		t.Fatalf("err: %v", err)
-	}
-
-	// Wait for window update to be applied by server. Should be "instant" but CI
-	// can be slow.
-	time.Sleep(2 * time.Second)
-
-	// Assert server received window update
-	window := atomic.LoadUint32(&wr.sendWindow)
-	if exp := uint32(partialReadSize); window != exp {
-		t.Fatalf("sendWindow: exp=%d, got=%d", exp, window)
-	}
+	})
 }
 
 func TestSession_sendNoWait_Timeout(t *testing.T) {
-	t.Skip("FIXME: expects a pipe")
 	conf := testConfNoKeepAlive()
 
-	client, server := testClientServerConfig(t, conf, conf.Clone())
+	clientConn, serverConn := testConnPipe(t)
+	client, server := testClientServerConfig(t, clientConn, serverConn, conf, conf.Clone())
 
 	errCh := make(chan error, 2)
 
@@ -1461,7 +1575,7 @@ func TestSession_sendNoWait_Timeout(t *testing.T) {
 		}
 		defer stream.Close()
 
-		conn := client.conn.(*pipeConn)
+		conn := clientConn.(*pipeConn)
 		conn.writeBlocker.Lock()
 		defer conn.writeBlocker.Unlock()
 
@@ -1485,10 +1599,10 @@ func TestSession_sendNoWait_Timeout(t *testing.T) {
 }
 
 func TestSession_PingOfDeath(t *testing.T) {
-	t.Skip("FIXME: expects a pipe")
 	conf := testConfNoKeepAlive()
 
-	client, server := testClientServerConfig(t, conf, conf.Clone())
+	clientConn, serverConn := testConnPipe(t)
+	client, server := testClientServerConfig(t, clientConn, serverConn, conf, conf.Clone())
 
 	errCh := make(chan error, 2)
 
@@ -1559,10 +1673,10 @@ func TestSession_PingOfDeath(t *testing.T) {
 }
 
 func TestSession_ConnectionWriteTimeout(t *testing.T) {
-	t.Skip("FIXME: expects a pipe")
 	conf := testConfNoKeepAlive()
 
-	client, server := testClientServerConfig(t, conf, conf.Clone())
+	clientConn, serverConn := testConnPipe(t)
+	client, server := testClientServerConfig(t, clientConn, serverConn, conf, conf.Clone())
 
 	errCh := make(chan error, 2)
 
@@ -1586,7 +1700,7 @@ func TestSession_ConnectionWriteTimeout(t *testing.T) {
 		}
 		defer stream.Close()
 
-		conn := client.conn.(*pipeConn)
+		conn := clientConn.(*pipeConn)
 		conn.writeBlocker.Lock()
 		defer conn.writeBlocker.Unlock()
 
