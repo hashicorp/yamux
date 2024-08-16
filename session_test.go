@@ -877,56 +877,58 @@ func TestManyStreams_PingPong(t *testing.T) {
 
 // TestHalfClose asserts that half closed streams can still read.
 func TestHalfClose(t *testing.T) {
-	client, server := testClientServer(t)
+	testConnTypes(t, func(t testing.TB, clientConn, serverConn io.ReadWriteCloser) {
+		client, server := testClientServerConfig(t, clientConn, serverConn, testConf(), testConf())
 
-	clientStream, err := client.Open()
-	if err != nil {
-		t.Fatalf("err: %v", err)
-	}
-	if _, err = clientStream.Write([]byte("a")); err != nil {
-		t.Fatalf("err: %v", err)
-	}
+		clientStream, err := client.Open()
+		if err != nil {
+			t.Fatalf("err: %v", err)
+		}
+		if _, err = clientStream.Write([]byte("a")); err != nil {
+			t.Fatalf("err: %v", err)
+		}
 
-	serverStream, err := server.Accept()
-	if err != nil {
-		t.Fatalf("err: %v", err)
-	}
-	serverStream.Close() // Half close
+		serverStream, err := server.Accept()
+		if err != nil {
+			t.Fatalf("err: %v", err)
+		}
+		serverStream.Close() // Half close
 
-	// Server reads 1 byte written by Client
-	buf := make([]byte, 4)
-	n, err := serverStream.Read(buf)
-	if err != nil {
-		t.Fatalf("err: %v", err)
-	}
-	if n != 1 {
-		t.Fatalf("bad: %v", n)
-	}
+		// Server reads 1 byte written by Client
+		buf := make([]byte, 4)
+		n, err := serverStream.Read(buf)
+		if err != nil {
+			t.Fatalf("err: %v", err)
+		}
+		if n != 1 {
+			t.Fatalf("bad: %v", n)
+		}
 
-	// Send more
-	if _, err = clientStream.Write([]byte("bcd")); err != nil {
-		t.Fatalf("err: %v", err)
-	}
-	clientStream.Close()
+		// Send more
+		if _, err = clientStream.Write([]byte("bcd")); err != nil {
+			t.Fatalf("err: %v", err)
+		}
+		clientStream.Close()
 
-	// Read after close always returns the bytes written but may or may not
-	// receive the EOF.
-	n, err = serverStream.Read(buf)
-	if err != nil {
-		t.Fatalf("err: %v", err)
-	}
-	if n != 3 {
-		t.Fatalf("bad: %v", n)
-	}
+		// Read after close always returns the bytes written but may or may not
+		// receive the EOF.
+		n, err = serverStream.Read(buf)
+		if err != nil {
+			t.Fatalf("err: %v", err)
+		}
+		if n != 3 {
+			t.Fatalf("bad: %v", n)
+		}
 
-	// EOF after close
-	n, err = serverStream.Read(buf)
-	if err != io.EOF {
-		t.Fatalf("err: %v", err)
-	}
-	if n != 0 {
-		t.Fatalf("bad: %v", n)
-	}
+		// EOF after close
+		n, err = serverStream.Read(buf)
+		if err != io.EOF {
+			t.Fatalf("err: %v", err)
+		}
+		if n != 0 {
+			t.Fatalf("bad: %v", n)
+		}
+	})
 }
 
 func TestHalfCloseSessionShutdown(t *testing.T) {
