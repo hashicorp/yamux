@@ -523,7 +523,6 @@ func TestNonNilInterface(t *testing.T) {
 	}
 }
 
-// TestSendData_Small asserts that
 func TestSendData_Small(t *testing.T) {
 	client, server := testClientServer(t)
 
