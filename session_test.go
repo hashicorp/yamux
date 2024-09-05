@@ -125,7 +125,7 @@ func testConnTLS(t testing.TB) (io.ReadWriteCloser, io.ReadWriteCloser) {
 	}
 	t.Cleanup(func() { _ = l.Close() })
 
-	var srv net.Conn
+	var server net.Conn
 	errCh := make(chan error, 1)
 	go func() {
 		defer close(errCh)
@@ -135,7 +135,7 @@ func testConnTLS(t testing.TB) (io.ReadWriteCloser, io.ReadWriteCloser) {
 			return
 		}
 
-		srv = tls.Server(conn, &tls.Config{
+		server = tls.Server(conn, &tls.Config{
 			Certificates: []tls.Certificate{cert},
 		})
 	}()
@@ -155,9 +155,9 @@ func testConnTLS(t testing.TB) (io.ReadWriteCloser, io.ReadWriteCloser) {
 	if err := <-errCh; err != nil {
 		t.Fatalf("error creating tls server: %v", err)
 	}
-	t.Cleanup(func() { _ = srv.Close() })
+	t.Cleanup(func() { _ = server.Close() })
 
-	return tlsClient, srv
+	return tlsClient, server
 }
 
 // connTypeFunc is func that returns a client and server connection for testing
