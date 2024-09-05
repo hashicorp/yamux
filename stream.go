@@ -143,14 +143,17 @@ WAIT:
 		timeout = timer.C
 	}
 	select {
+	case <-s.session.shutdownCh:
 	case <-s.recvNotifyCh:
-		if timer != nil {
-			timer.Stop()
-		}
-		goto START
 	case <-timeout:
 		return 0, ErrTimeout
 	}
+	if timer != nil {
+		if !timer.Stop() {
+			<-timeout
+		}
+	}
+	goto START
 }
 
 // Write is used to write to the stream
@@ -219,17 +222,25 @@ START:
 
 WAIT:
 	var timeout <-chan time.Time
+	var timer *time.Timer
 	writeDeadline := s.writeDeadline.Load().(time.Time)
 	if !writeDeadline.IsZero() {
 		delay := time.Until(writeDeadline)
-		timeout = time.After(delay)
+		timer = time.NewTimer(delay)
+		timeout = timer.C
 	}
 	select {
+	case <-s.session.shutdownCh:
 	case <-s.sendNotifyCh:
-		goto START
 	case <-timeout:
 		return 0, ErrTimeout
 	}
+	if timer != nil {
+		if !timer.Stop() {
+			<-timeout
+		}
+	}
+	goto START
 }
 
 // sendFlags determines any flags that are appropriate
