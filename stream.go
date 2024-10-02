@@ -91,7 +91,9 @@ func (s *Stream) StreamID() uint32 {
 	return s.id
 }
 
-// Read is used to read from the stream
+// Read is used to read from the stream. It is safe to call Write, Read, and/or
+// Close concurrently but Stream provides no guarantees that concurrent Reads
+// will receive data in response to Writes made from the same goroutine.
 func (s *Stream) Read(b []byte) (n int, err error) {
 	defer asyncNotify(s.recvNotifyCh)
 START:
@@ -158,7 +160,9 @@ WAIT:
 	goto START
 }
 
-// Write is used to write to the stream
+// Write is used to write to the stream. It is safe to call Write, Read, and/or
+// Close concurrently but Stream provides no guarantees that concurrent Reads
+// will receive data in response to Writes made from the same goroutine.
 func (s *Stream) Write(b []byte) (n int, err error) {
 	s.sendLock.Lock()
 	defer s.sendLock.Unlock()
@@ -320,7 +324,8 @@ func (s *Stream) sendClose() error {
 	return nil
 }
 
-// Close is used to close the stream
+// Close is used to close the stream. It is safe to call Write, Read, and/or
+// Close concurrently.
 func (s *Stream) Close() error {
 	closeStream := false
 	s.stateLock.Lock()
