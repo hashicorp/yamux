@@ -405,7 +405,7 @@ func (s *Session) waitForSendErr(hdr header, body []byte, errCh chan error) erro
 	select {
 	case s.sendCh <- ready:
 	case <-s.shutdownCh:
-		return ErrSessionShutdown
+		return s.shutdownErr
 	case <-timer.C:
 		return ErrConnectionWriteTimeout
 	}
@@ -435,7 +435,7 @@ func (s *Session) waitForSendErr(hdr header, body []byte, errCh chan error) erro
 		return err
 	case <-s.shutdownCh:
 		bodyCopy()
-		return ErrSessionShutdown
+		return s.shutdownErr
 	case <-timer.C:
 		bodyCopy()
 		return ErrConnectionWriteTimeout
