@@ -1022,7 +1022,7 @@ func TestReadDeadline(t *testing.T) {
 	// We assert that we return an error meeting the interface to avoid
 	// accidently breaking yamux session compatability with the standard
 	// library's http server implementation.
-	if netErr, ok := err.(net.Error); !ok || !netErr.Timeout() {
+	if netErr, ok := err.(net.Error); !ok || !netErr.Timeout() || !netErr.Temporary() {
 		t.Fatalf("reading timeout error is expected to implement net.Error and return true when calling Timeout()")
 	}
 }
