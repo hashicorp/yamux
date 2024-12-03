@@ -22,8 +22,10 @@ const (
 	streamReset
 )
 
-// Stream is used to represent a logical stream
-// within a session.
+// Stream is used to represent a logical stream within a session. Methods on
+// Stream are safe to call concurrently with one another, but all Read calls
+// must be on the same goroutine and all Write calls must be on the same
+// goroutine.
 type Stream struct {
 	recvWindow uint32
 	sendWindow uint32
@@ -92,8 +94,10 @@ func (s *Stream) StreamID() uint32 {
 }
 
 // Read is used to read from the stream. It is safe to call Write, Read, and/or
-// Close concurrently but Stream provides no guarantees that concurrent Reads
-// will receive data in response to Writes made from the same goroutine.
+// Close concurrently with each other, but calls to Read are not reentrant and
+// should not be called from multiple goroutines. Multiple Read goroutines would
+// receive different chunks of data from the Stream and be unable to reassemble
+// them in order or along message boundaries, and may encounter deadlocks.
 func (s *Stream) Read(b []byte) (n int, err error) {
 	defer asyncNotify(s.recvNotifyCh)
 START:
@@ -161,8 +165,8 @@ WAIT:
 }
 
 // Write is used to write to the stream. It is safe to call Write, Read, and/or
-// Close concurrently but Stream provides no guarantees that concurrent Reads
-// will receive data in response to Writes made from the same goroutine.
+// Close concurrently with each other, but calls to Write are not reentrant and
+// should not be called from multiple goroutines.
 func (s *Stream) Write(b []byte) (n int, err error) {
 	s.sendLock.Lock()
 	defer s.sendLock.Unlock()
@@ -324,8 +328,7 @@ func (s *Stream) sendClose() error {
 	return nil
 }
 
-// Close is used to close the stream. It is safe to call Write, Read, and/or
-// Close concurrently.
+// Close is used to close the stream. It is safe to call Close concurrently.
 func (s *Stream) Close() error {
 	closeStream := false
 	s.stateLock.Lock()
