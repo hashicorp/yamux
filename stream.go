@@ -136,7 +136,7 @@ START:
 
 	// Send a window update potentially
 	err = s.sendWindowUpdate()
-	if err == ErrSessionShutdown {
+	if s.session.IsClosed() {
 		err = nil
 	}
 	return n, err
@@ -217,7 +217,7 @@ START:
 	// Send the header
 	s.sendHdr.encode(typeData, flags, s.id, max)
 	if err = s.session.waitForSendErr(s.sendHdr, body, s.sendErr); err != nil {
-		if errors.Is(err, ErrSessionShutdown) || errors.Is(err, ErrConnectionWriteTimeout) {
+		if s.session.IsClosed() || errors.Is(err, ErrConnectionWriteTimeout) {
 			// Message left in ready queue, header re-use is unsafe.
 			s.sendHdr = header(make([]byte, headerSize))
 		}
@@ -301,7 +301,7 @@ func (s *Stream) sendWindowUpdate() error {
 	// Send the header
 	s.controlHdr.encode(typeWindowUpdate, flags, s.id, delta)
 	if err := s.session.waitForSendErr(s.controlHdr, nil, s.controlErr); err != nil {
-		if errors.Is(err, ErrSessionShutdown) || errors.Is(err, ErrConnectionWriteTimeout) {
+		if s.session.IsClosed() || errors.Is(err, ErrConnectionWriteTimeout) {
 			// Message left in ready queue, header re-use is unsafe.
 			s.controlHdr = header(make([]byte, headerSize))
 		}
@@ -319,7 +319,7 @@ func (s *Stream) sendClose() error {
 	flags |= flagFIN
 	s.controlHdr.encode(typeWindowUpdate, flags, s.id, 0)
 	if err := s.session.waitForSendErr(s.controlHdr, nil, s.controlErr); err != nil {
-		if errors.Is(err, ErrSessionShutdown) || errors.Is(err, ErrConnectionWriteTimeout) {
+		if s.session.IsClosed() || errors.Is(err, ErrConnectionWriteTimeout) {
 			// Message left in ready queue, header re-use is unsafe.
 			s.controlHdr = header(make([]byte, headerSize))
 		}
