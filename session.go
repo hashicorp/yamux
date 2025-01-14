@@ -388,7 +388,7 @@ func (s *Session) waitForSend(hdr header, body []byte) error {
 // waitForSendErr waits to send a header with optional data, checking for a
 // potential shutdown. Since there's the expectation that sends can happen
 // in a timely manner, we enforce the connection write timeout here.
-func (s *Session) waitForSendErr(hdr header, body []byte, errCh chan error) error {
+func (s *Session) waitForSendErr(hdr header, body []byte, errCh chan error) (err error) {
 	t := timerPool.Get()
 	timer := t.(*time.Timer)
 	timer.Reset(s.config.ConnectionWriteTimeout)
@@ -401,13 +401,21 @@ func (s *Session) waitForSendErr(hdr header, body []byte, errCh chan error) erro
 		timerPool.Put(t)
 	}()
 
+	defer func() {
+		if err != nil {
+			go s.exitErr(err)
+		}
+	}()
+
 	ready := &sendReady{Hdr: hdr, Body: body, Err: errCh}
 	select {
 	case s.sendCh <- ready:
 	case <-s.shutdownCh:
-		return ErrSessionShutdown
+		err = ErrSessionShutdown
+		return
 	case <-timer.C:
-		return ErrConnectionWriteTimeout
+		err = ErrConnectionWriteTimeout
+		return
 	}
 
 	bodyCopy := func() {
@@ -431,21 +439,21 @@ func (s *Session) waitForSendErr(hdr header, body []byte, errCh chan error) erro
 	}
 
 	select {
-	case err := <-errCh:
-		return err
+	case err = <-errCh:
 	case <-s.shutdownCh:
 		bodyCopy()
-		return ErrSessionShutdown
+		err = ErrSessionShutdown
 	case <-timer.C:
 		bodyCopy()
-		return ErrConnectionWriteTimeout
+		err = ErrConnectionWriteTimeout
 	}
+	return
 }
 
 // sendNoWait does a send without waiting. Since there's the expectation that
 // the send happens right here, we enforce the connection write timeout if we
 // can't queue the header to be sent.
-func (s *Session) sendNoWait(hdr header) error {
+func (s *Session) sendNoWait(hdr header) (err error) {
 	t := timerPool.Get()
 	timer := t.(*time.Timer)
 	timer.Reset(s.config.ConnectionWriteTimeout)
@@ -458,14 +466,20 @@ func (s *Session) sendNoWait(hdr header) error {
 		timerPool.Put(t)
 	}()
 
+	defer func() {
+		if err != nil {
+			go s.exitErr(err)
+		}
+	}()
+
 	select {
 	case s.sendCh <- &sendReady{Hdr: hdr}:
-		return nil
 	case <-s.shutdownCh:
-		return ErrSessionShutdown
+		err = ErrSessionShutdown
 	case <-timer.C:
-		return ErrConnectionWriteTimeout
+		err = ErrConnectionWriteTimeout
 	}
+	return
 }
 
 // send is a long running goroutine that sends data

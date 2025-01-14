@@ -126,7 +126,6 @@ func TestTimeoutParallel(t *testing.T) {
 	var wg sync.WaitGroup
 	// used for failing now
 	errCh := make(chan error, 1)
-	t.Parallel()
 
 	// 1. Setup net.Pipe
 	serverSide, clientSide := makeConnPair()
