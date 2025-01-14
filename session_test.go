@@ -1663,7 +1663,12 @@ func TestSession_PingOfDeath(t *testing.T) {
 		time.Sleep(2 * server.config.ConnectionWriteTimeout)
 		conn.writeBlocker.Unlock()
 		if _, err = client.Ping(); err != nil {
-			errCh <- err
+			// If a write times out, we now expect the session to be shutdown.
+			if err == ErrSessionShutdown {
+				errCh <- nil
+			} else {
+				errCh <- err
+			}
 			return
 		}
 
