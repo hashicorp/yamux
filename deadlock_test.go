@@ -164,11 +164,8 @@ func TestTimeoutParallel(t *testing.T) {
 	go func() {
 		wg.Add(1)
 		defer wg.Done()
-		streamAserver, err := serverSes.Open()
-		if err != nil {
-			t.Fatalf("server open stream A: %v", err)
-		}
-		err = monotonicWriter(t, streamAserver, "A", pauseA)
+		streamAserver, _ := serverSes.Open()
+		err := monotonicWriter(t, streamAserver, "A", pauseA)
 		if err != nil && !errors.Is(err, ErrStreamClosed) {
 			failNow(errCh, "[A-writer-server] received unexpected error", err)
 		}
@@ -180,7 +177,7 @@ func TestTimeoutParallel(t *testing.T) {
 		defer wg.Done()
 		streamAclient, _ := clientSes.Accept()
 		defer streamAclient.Close()
-		err = monotonicReader(t, streamAclient, "A")
+		err := monotonicReader(t, streamAclient, "A")
 		if err != nil && !errors.Is(err, io.EOF) {
 			failNow(errCh, "[A-reader-client] received unexpected error", err)
 		}
@@ -191,7 +188,7 @@ func TestTimeoutParallel(t *testing.T) {
 		wg.Add(1)
 		defer wg.Done()
 		streamBserver, _ := serverSes.Open()
-		err = monotonicWriter(t, streamBserver, "B", nil)
+		err := monotonicWriter(t, streamBserver, "B", nil)
 		if err != nil && !errors.Is(err, ErrConnectionWriteTimeout) {
 			failNow(errCh, "[B-writer-server] received unexpected error", err)
 		}
@@ -203,7 +200,7 @@ func TestTimeoutParallel(t *testing.T) {
 		defer wg.Done()
 		streamBclient, _ := clientSes.Accept()
 		defer streamBclient.Close()
-		err = monotonicReader(t, streamBclient, "B")
+		err := monotonicReader(t, streamBclient, "B")
 		if err != nil && !errors.Is(err, io.EOF) {
 			failNow(errCh, "[B-reader-client] received unexpected error", err)
 		}
