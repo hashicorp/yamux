@@ -1,8 +1,11 @@
 name: CI Tests
 on:
+  pull_request:
+    paths-ignore:
+      - 'README.md'
   push:
     branches:
-      - 'coverage-test'
+      - 'master'
     paths-ignore:
       - 'README.md'
 
