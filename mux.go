@@ -77,7 +77,7 @@ func VerifyConfig(config *Config) error {
 	if config.AcceptBacklog <= 0 {
 		return fmt.Errorf("backlog must be positive")
 	}
-	if config.KeepAliveInterval == 0 {
+	if config.EnableKeepAlive && config.KeepAliveInterval == 0 {
 		return fmt.Errorf("keep-alive interval must be positive")
 	}
 	if config.MaxStreamWindowSize < initialStreamWindow {
