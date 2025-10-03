@@ -5,7 +5,7 @@ import (
 	"time"
 )
 
-// Logger is a abstract of *log.Logger
+// Logger is an abstract of *log.Logger
 type Logger interface {
 	Print(v ...interface{})
 	Printf(format string, v ...interface{})
@@ -39,12 +39,4 @@ func asyncNotify(ch chan struct{}) {
 	case ch <- struct{}{}:
 	default:
 	}
-}
-
-// min computes the minimum of two values
-func min(a, b uint32) uint32 {
-	if a < b {
-		return a
-	}
-	return b
 }

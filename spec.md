@@ -38,7 +38,7 @@ message types are supported:
   This is used to implement per-session flow control.
 
 * 0x2 Ping - Used to measure RTT. It can also be used to heart-beat
-  and do keep-alives over TCP.
+  and do keep-alive over TCP.
 
 * 0x3 Go Away - Used to close a session.
 

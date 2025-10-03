@@ -1,8 +1,3 @@
-# Compiled Object files, Static and Dynamic libs (Shared Objects)
-*.o
-*.a
-*.so
-
 # Folders
 _obj
 _test
@@ -19,5 +14,34 @@ _cgo_export.*
 
 _testmain.go
 
+### Intellij template
+
+.idea/
+
+# IntelliJ
+out/
+
+# SonarLint plugin
+.idea/sonarlint/
+
+# Binaries for programs and plugins
 *.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.o
+*.a
+
+# Test binary, built with `go test -c`
 *.test
+
+# Output of the go coverage tool, specifically when used with LiteIDE
+*.out
+
+# Go workspace file
+go.work
+go.work.sum
+
+# env file
+.env

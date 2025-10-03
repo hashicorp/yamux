@@ -4,26 +4,27 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log"
 	"math"
 	"net"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 )
 
-// Session is used to wrap a reliable ordered connection and to
-// multiplex it into multiple streams.
+// Session wraps a reliable, ordered byte stream (for example a TCP
+// connection) and multiplexes it into multiple logical streams. Session is
+// safe for concurrent use by multiple goroutines.
 type Session struct {
-	// remoteGoAway indicates the remote side does
-	// not want futher connections. Must be first for alignment.
+	// remoteGoAway indicates the remote side does not want further
+	// connections. Must be first for alignment.
 	remoteGoAway int32
 
 	// localGoAway indicates that we should stop
-	// accepting futher connections. Must be first for alignment.
+	// accepting further connections. Must be first for alignment.
 	localGoAway int32
 
 	// nextStreamID is the next stream we should
@@ -66,6 +67,9 @@ type Session struct {
 	// or to send a header out directly.
 	sendCh chan *sendReady
 
+	// pingReplyCh queues ping reply IDs to avoid unbounded goroutines.
+	pingReplyCh chan uint32
+
 	// recvDoneCh is closed when recv() exits to avoid a race
 	// between stream registration and stream shutdown
 	recvDoneCh chan struct{}
@@ -77,6 +81,9 @@ type Session struct {
 	shutdownCh      chan struct{}
 	shutdownLock    sync.Mutex
 	shutdownErrLock sync.Mutex
+
+	// remoteGoAwayCh is closed when we receive a normal go-away from remote.
+	remoteGoAwayCh chan struct{}
 }
 
 // sendReady is used to either mark a stream as ready
@@ -96,19 +103,26 @@ func newSession(config *Config, conn io.ReadWriteCloser, client bool) *Session {
 	}
 
 	s := &Session{
-		config:     config,
-		logger:     logger,
-		conn:       conn,
-		bufRead:    bufio.NewReader(conn),
-		pings:      make(map[uint32]chan struct{}),
-		streams:    make(map[uint32]*Stream),
-		inflight:   make(map[uint32]struct{}),
-		synCh:      make(chan struct{}, config.AcceptBacklog),
-		acceptCh:   make(chan *Stream, config.AcceptBacklog),
-		sendCh:     make(chan *sendReady, 64),
-		recvDoneCh: make(chan struct{}),
-		sendDoneCh: make(chan struct{}),
-		shutdownCh: make(chan struct{}),
+		config: config,
+		logger: logger,
+		conn:   conn,
+		bufRead: func() *bufio.Reader {
+			if config.ReadBufferSize > 0 {
+				return bufio.NewReaderSize(conn, config.ReadBufferSize)
+			}
+			return bufio.NewReader(conn)
+		}(),
+		pings:          make(map[uint32]chan struct{}),
+		streams:        make(map[uint32]*Stream),
+		inflight:       make(map[uint32]struct{}),
+		synCh:          make(chan struct{}, config.AcceptBacklog),
+		acceptCh:       make(chan *Stream, config.AcceptBacklog),
+		sendCh:         make(chan *sendReady, 64),
+		pingReplyCh:    make(chan uint32, 128),
+		recvDoneCh:     make(chan struct{}),
+		sendDoneCh:     make(chan struct{}),
+		shutdownCh:     make(chan struct{}),
+		remoteGoAwayCh: make(chan struct{}),
 	}
 	if client {
 		s.nextStreamID = 1
@@ -117,10 +131,24 @@ func newSession(config *Config, conn io.ReadWriteCloser, client bool) *Session {
 	}
 	go s.recv()
 	go s.send()
+	go s.pingReplyLoop()
 	if config.EnableKeepAlive {
 		go s.keepalive()
 	}
 	return s
+}
+
+// withWriteDeadline sets a write deadline on the underlying connection if supported
+// and returns a function to clear it.
+func (s *Session) withWriteDeadline() func() {
+	type writeDeadliner interface{ SetWriteDeadline(time.Time) error }
+	if s.config.ConnectionWriteTimeout > 0 {
+		if c, ok := s.conn.(writeDeadliner); ok {
+			_ = c.SetWriteDeadline(time.Now().Add(s.config.ConnectionWriteTimeout))
+			return func() { _ = c.SetWriteDeadline(time.Time{}) }
+		}
+	}
+	return func() {}
 }
 
 // IsClosed does a safe check to see if we have shutdown
@@ -222,12 +250,14 @@ func (s *Session) setOpenTimeout(stream *Stream) {
 		// Timeout reached while waiting for ACK.
 		// Close the session to force connection re-establishment.
 		s.logger.Printf("[ERR] yamux: aborted stream open (destination=%s): %v", s.RemoteAddr().String(), ErrTimeout.err)
-		s.Close()
+		_ = s.Close()
 	}
 }
 
-// Accept is used to block until the next available stream
-// is ready to be accepted.
+// Accept blocks until the next incoming stream is available and returns a
+// net.Conn for it. If a remote GoAway has been received and no streams are
+// pending, Accept returns ErrRemoteGoAway. If the session closes, the
+// session shutdown error is returned.
 func (s *Session) Accept() (net.Conn, error) {
 	conn, err := s.AcceptStream()
 	if err != nil {
@@ -236,34 +266,68 @@ func (s *Session) Accept() (net.Conn, error) {
 	return conn, err
 }
 
-// AcceptStream is used to block until the next available stream
-// is ready to be accepted.
-func (s *Session) AcceptStream() (*Stream, error) {
+// prepareAcceptedStream sends the initial window update for a newly
+// accepted stream and handles cleanup on error.
+func (s *Session) prepareAcceptedStream(stream *Stream) (*Stream, error) {
+	if err := stream.sendWindowUpdate(); err != nil {
+		// Cleanup the stream on initial ACK failure
+		stream.forceClose()
+		s.closeStream(stream.id)
+		return nil, err
+	}
+	return stream, nil
+}
+
+// acceptStreamInternal tries to return a pending stream immediately and,
+// if none is pending, blocks until a stream is available or termination
+// conditions occur. If a non-nil context is provided, its cancellation is
+// respected while blocking.
+func (s *Session) acceptStreamInternal(ctx context.Context) (*Stream, error) {
+	// Prefer any pending stream immediately.
 	select {
 	case stream := <-s.acceptCh:
-		if err := stream.sendWindowUpdate(); err != nil {
-			return nil, err
+		return s.prepareAcceptedStream(stream)
+	default:
+	}
+
+	for {
+		select {
+		case stream := <-s.acceptCh:
+			return s.prepareAcceptedStream(stream)
+		case <-s.remoteGoAwayCh:
+			return nil, ErrRemoteGoAway
+		case <-s.shutdownCh:
+			return nil, s.shutdownErr
+		default:
+			if ctx != nil {
+				select {
+				case <-ctx.Done():
+					return nil, ctx.Err()
+				case stream := <-s.acceptCh:
+					return s.prepareAcceptedStream(stream)
+				case <-s.remoteGoAwayCh:
+					return nil, ErrRemoteGoAway
+				case <-s.shutdownCh:
+					return nil, s.shutdownErr
+				}
+			}
+			// If no context is provided, loop back and wait on the main select again.
 		}
-		return stream, nil
-	case <-s.shutdownCh:
-		return nil, s.shutdownErr
 	}
 }
 
-// AcceptStream is used to block until the next available stream
-// is ready to be accepted.
+// AcceptStream blocks until the next incoming stream is available and returns
+// the concrete *Stream value. Behavior matches Accept.
+func (s *Session) AcceptStream() (*Stream, error) {
+	return s.acceptStreamInternal(context.Background())
+}
+
+// AcceptStreamWithContext blocks until the next incoming stream is available
+// or the provided context is done. It prefers pending streams immediately and
+// returns ErrRemoteGoAway if a remote GoAway has been received and there are
+// no pending streams.
 func (s *Session) AcceptStreamWithContext(ctx context.Context) (*Stream, error) {
-	select {
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	case stream := <-s.acceptCh:
-		if err := stream.sendWindowUpdate(); err != nil {
-			return nil, err
-		}
-		return stream, nil
-	case <-s.shutdownCh:
-		return nil, s.shutdownErr
-	}
+	return s.acceptStreamInternal(ctx)
 }
 
 // Close is used to close the session and all streams.
@@ -285,7 +349,7 @@ func (s *Session) Close() error {
 
 	close(s.shutdownCh)
 
-	s.conn.Close()
+	_ = s.conn.Close()
 	<-s.recvDoneCh
 
 	s.streamLock.Lock()
@@ -305,7 +369,7 @@ func (s *Session) exitErr(err error) {
 		s.shutdownErr = err
 	}
 	s.shutdownErrLock.Unlock()
-	s.Close()
+	_ = s.Close()
 }
 
 // GoAway can be used to prevent accepting further
@@ -330,7 +394,14 @@ func (s *Session) Ping() (time.Duration, error) {
 	// Get a new ping id, mark as pending
 	s.pingLock.Lock()
 	id := s.pingID
-	s.pingID++
+	// Find an ID not currently in use; handle wrap-around naturally.
+	for {
+		if _, exists := s.pings[id]; !exists {
+			break
+		}
+		id++
+	}
+	s.pingID = id + 1
 	s.pings[id] = ch
 	s.pingLock.Unlock()
 
@@ -343,9 +414,13 @@ func (s *Session) Ping() (time.Duration, error) {
 
 	// Wait for a response
 	start := time.Now()
+	timeout := s.config.KeepAliveTimeout
+	if timeout <= 0 {
+		timeout = s.config.ConnectionWriteTimeout
+	}
 	select {
 	case <-ch:
-	case <-time.After(s.config.ConnectionWriteTimeout):
+	case <-time.After(timeout):
 		s.pingLock.Lock()
 		delete(s.pings, id) // Ignore it if a response comes later.
 		s.pingLock.Unlock()
@@ -361,9 +436,11 @@ func (s *Session) Ping() (time.Duration, error) {
 // keepalive is a long running goroutine that periodically does
 // a ping to keep the connection alive.
 func (s *Session) keepalive() {
+	ticker := time.NewTicker(s.config.KeepAliveInterval)
+	defer ticker.Stop()
 	for {
 		select {
-		case <-time.After(s.config.KeepAliveInterval):
+		case <-ticker.C:
 			_, err := s.Ping()
 			if err != nil {
 				if err != ErrSessionShutdown {
@@ -467,13 +544,17 @@ func (s *Session) sendNoWait(hdr header) error {
 	}
 }
 
-// send is a long running goroutine that sends data
+// send is a long-running goroutine that serializes header/body writes to the
+// underlying connection.
 func (s *Session) send() {
 	if err := s.sendLoop(); err != nil {
 		s.exitErr(err)
 	}
 }
 
+// sendLoop performs the actual writes. It coalesces header+body via writev when
+// available (using net.Buffers) and applies per-write deadlines using
+// ConnectionWriteTimeout.
 func (s *Session) sendLoop() error {
 	defer close(s.sendDoneCh)
 	var bodyBuf bytes.Buffer
@@ -482,22 +563,11 @@ func (s *Session) sendLoop() error {
 
 		select {
 		case ready := <-s.sendCh:
-			// Send a header if ready
-			if ready.Hdr != nil {
-				_, err := s.conn.Write(ready.Hdr)
-				if err != nil {
-					s.logger.Printf("[ERR] yamux: Failed to write header: %v", err)
-					asyncSendErr(ready.Err, err)
-					return err
-				}
-			}
-
+			// Copy body (if any) into buffer first so we can coalesce header+body.
 			ready.mu.Lock()
 			if ready.Body != nil {
-				// Copy the body into the buffer to avoid
-				// holding a mutex lock during the write.
-				_, err := bodyBuf.Write(ready.Body)
-				if err != nil {
+				// Copy the body into the buffer to avoid holding a lock during the write.
+				if _, err := bodyBuf.Write(ready.Body); err != nil {
 					ready.Body = nil
 					ready.mu.Unlock()
 					s.logger.Printf("[ERR] yamux: Failed to copy body into buffer: %v", err)
@@ -508,13 +578,39 @@ func (s *Session) sendLoop() error {
 			}
 			ready.mu.Unlock()
 
-			if bodyBuf.Len() > 0 {
-				// Send data from a body if given
-				_, err := s.conn.Write(bodyBuf.Bytes())
+			// Attempt to coalesce header and body in a single writev when both exist.
+			if ready.Hdr != nil && bodyBuf.Len() > 0 {
+				cc := s.withWriteDeadline()
+				// net.Buffers will use writev on supported platforms via WriteTo.
+				buffers := net.Buffers{ready.Hdr, bodyBuf.Bytes()}
+				_, err := buffers.WriteTo(s.conn)
+				cc()
 				if err != nil {
-					s.logger.Printf("[ERR] yamux: Failed to write body: %v", err)
+					s.logger.Printf("[ERR] yamux: Failed to write header/body: %v", err)
 					asyncSendErr(ready.Err, err)
 					return err
+				}
+			} else {
+				// Header-only or body-only paths
+				if ready.Hdr != nil {
+					cc := s.withWriteDeadline()
+					_, err := s.conn.Write(ready.Hdr)
+					cc()
+					if err != nil {
+						s.logger.Printf("[ERR] yamux: Failed to write header: %v", err)
+						asyncSendErr(ready.Err, err)
+						return err
+					}
+				}
+				if bodyBuf.Len() > 0 {
+					cc := s.withWriteDeadline()
+					_, err := s.conn.Write(bodyBuf.Bytes())
+					cc()
+					if err != nil {
+						s.logger.Printf("[ERR] yamux: Failed to write body: %v", err)
+						asyncSendErr(ready.Err, err)
+						return err
+					}
 				}
 			}
 
@@ -526,7 +622,8 @@ func (s *Session) sendLoop() error {
 	}
 }
 
-// recv is a long running goroutine that accepts new data
+// recv is a long-running goroutine that accepts frames and dispatches them to
+// appropriate handlers.
 func (s *Session) recv() {
 	if err := s.recvLoop(); err != nil {
 		s.exitErr(err)
@@ -543,14 +640,16 @@ var (
 	}
 )
 
-// recvLoop continues to receive data until a fatal error is encountered
+// recvLoop reads frame headers, validates version and type, and dispatches
+// frames until a fatal error occurs.
 func (s *Session) recvLoop() error {
 	defer close(s.recvDoneCh)
 	hdr := header(make([]byte, headerSize))
 	for {
 		// Read the header
 		if _, err := io.ReadFull(s.bufRead, hdr); err != nil {
-			if err != io.EOF && !strings.Contains(err.Error(), "closed") && !strings.Contains(err.Error(), "reset by peer") {
+			// Avoid noisy logs on common close conditions
+			if !errors.Is(err, io.EOF) && !errors.Is(err, io.ErrUnexpectedEOF) && !errors.Is(err, net.ErrClosed) && !errors.Is(err, io.ErrClosedPipe) {
 				s.logger.Printf("[ERR] yamux: Failed to read header: %v", err)
 			}
 			return err
@@ -625,7 +724,7 @@ func (s *Session) handleStreamMessage(hdr header) error {
 	return nil
 }
 
-// handlePing is invokde for a typePing frame
+// handlePing handles a typePing frame.
 func (s *Session) handlePing(hdr header) error {
 	flags := hdr.Flags()
 	pingID := hdr.Length()
@@ -633,13 +732,13 @@ func (s *Session) handlePing(hdr header) error {
 	// Check if this is a query, respond back in a separate context so we
 	// don't interfere with the receiving thread blocking for the write.
 	if flags&flagSYN == flagSYN {
-		go func() {
-			hdr := header(make([]byte, headerSize))
-			hdr.encode(typePing, flagACK, 0, pingID)
-			if err := s.sendNoWait(hdr); err != nil {
-				s.logger.Printf("[WARN] yamux: failed to send ping reply: %v", err)
-			}
-		}()
+		// Enqueue reply without unbounded goroutine creation.
+		select {
+		case s.pingReplyCh <- pingID:
+		default:
+			// Drop reply if queue is saturated to avoid resource exhaustion.
+			s.logger.Printf("[WARN] yamux: dropping ping reply due to full queue")
+		}
 		return nil
 	}
 
@@ -654,12 +753,30 @@ func (s *Session) handlePing(hdr header) error {
 	return nil
 }
 
-// handleGoAway is invokde for a typeGoAway frame
+// pingReplyLoop serializes ping replies to avoid spawning a goroutine per ping.
+func (s *Session) pingReplyLoop() {
+	for {
+		select {
+		case id := <-s.pingReplyCh:
+			hdr := header(make([]byte, headerSize))
+			hdr.encode(typePing, flagACK, 0, id)
+			if err := s.sendNoWait(hdr); err != nil {
+				s.logger.Printf("[WARN] yamux: failed to send ping reply: %v", err)
+			}
+		case <-s.shutdownCh:
+			return
+		}
+	}
+}
+
+// handleGoAway handles a typeGoAway frame.
 func (s *Session) handleGoAway(hdr header) error {
 	code := hdr.Length()
 	switch code {
 	case goAwayNormal:
-		atomic.SwapInt32(&s.remoteGoAway, 1)
+		if atomic.SwapInt32(&s.remoteGoAway, 1) == 0 {
+			close(s.remoteGoAwayCh)
+		}
 	case goAwayProtoErr:
 		s.logger.Printf("[ERR] yamux: received protocol error go away")
 		return fmt.Errorf("yamux protocol error")
@@ -673,7 +790,7 @@ func (s *Session) handleGoAway(hdr header) error {
 	return nil
 }
 
-// incomingStream is used to create a new incoming stream
+// incomingStream creates a new incoming stream.
 func (s *Session) incomingStream(id uint32) error {
 	// Reject immediately if we are doing a go away
 	if atomic.LoadInt32(&s.localGoAway) == 1 {
@@ -725,6 +842,8 @@ func (s *Session) closeStream(id uint32) {
 		default:
 			s.logger.Printf("[ERR] yamux: SYN tracking out of sync")
 		}
+		// Remove from inflight tracking to avoid leaks if stream closed pre-ACK
+		delete(s.inflight, id)
 	}
 	delete(s.streams, id)
 	s.streamLock.Unlock()

@@ -9,21 +9,24 @@ import (
 
 // Config is used to tune the Yamux session
 type Config struct {
-	// AcceptBacklog is used to limit how many streams may be
-	// waiting an accept.
+	// AcceptBacklog limits how many streams may be waiting to be accepted.
 	AcceptBacklog int
 
-	// EnableKeepalive is used to do a period keep alive
-	// messages using a ping.
+	// EnableKeepAlive enables periodic keep-alive messages using a ping.
 	EnableKeepAlive bool
 
-	// KeepAliveInterval is how often to perform the keep alive
+	// KeepAliveInterval is how often to perform the keep-alive when enabled.
 	KeepAliveInterval time.Duration
 
-	// ConnectionWriteTimeout is meant to be a "safety valve" timeout after
-	// we which will suspect a problem with the underlying connection and
-	// close it. This is only applied to writes, where's there's generally
-	// an expectation that things will move along quickly.
+	// KeepAliveTimeout bounds how long we wait for a Ping ACK when performing
+	// keep-alive. If zero, falls back to ConnectionWriteTimeout for backward
+	// compatibility with prior behavior.
+	KeepAliveTimeout time.Duration
+
+	// ConnectionWriteTimeout is a "safety valve" timeout after which we
+	// suspect a problem with the underlying connection and close it. This is
+	// only applied to writes, where there's generally an expectation that
+	// things will move along quickly.
 	ConnectionWriteTimeout time.Duration
 
 	// MaxStreamWindowSize is used to control the maximum
@@ -51,6 +54,10 @@ type Config struct {
 	// Logger is used to pass in the logger to be used. Either Logger or
 	// LogOutput can be set, not both.
 	Logger Logger
+
+	// ReadBufferSize controls the size of the buffered reader wrapping the
+	// underlying connection. If zero or negative, the default size is used.
+	ReadBufferSize int
 }
 
 func (c *Config) Clone() *Config {
@@ -64,6 +71,7 @@ func DefaultConfig() *Config {
 		AcceptBacklog:          256,
 		EnableKeepAlive:        true,
 		KeepAliveInterval:      30 * time.Second,
+		KeepAliveTimeout:       10 * time.Second,
 		ConnectionWriteTimeout: 10 * time.Second,
 		MaxStreamWindowSize:    initialStreamWindow,
 		StreamCloseTimeout:     5 * time.Minute,
@@ -72,16 +80,29 @@ func DefaultConfig() *Config {
 	}
 }
 
-// VerifyConfig is used to verify the sanity of configuration
+// VerifyConfig validates a Config for sane values and internal consistency.
+// It returns an error if any parameter is invalid.
 func VerifyConfig(config *Config) error {
 	if config.AcceptBacklog <= 0 {
 		return fmt.Errorf("backlog must be positive")
 	}
-	if config.KeepAliveInterval == 0 {
-		return fmt.Errorf("keep-alive interval must be positive")
+	if config.EnableKeepAlive && config.KeepAliveInterval <= 0 {
+		return fmt.Errorf("keep-alive interval must be positive when keepalive is enabled")
+	}
+	if config.ConnectionWriteTimeout <= 0 {
+		return fmt.Errorf("ConnectionWriteTimeout must be positive")
+	}
+	if config.StreamOpenTimeout < 0 {
+		return fmt.Errorf("StreamOpenTimeout must be >= 0")
+	}
+	if config.StreamCloseTimeout < 0 {
+		return fmt.Errorf("StreamCloseTimeout must be >= 0")
 	}
 	if config.MaxStreamWindowSize < initialStreamWindow {
 		return fmt.Errorf("MaxStreamWindowSize must be larger than %d", initialStreamWindow)
+	}
+	if config.EnableKeepAlive && config.KeepAliveTimeout < 0 {
+		return fmt.Errorf("keep-alive timeout must be >= 0 (0 means fallback)")
 	}
 	if config.LogOutput != nil && config.Logger != nil {
 		return fmt.Errorf("both Logger and LogOutput may not be set, select one")
@@ -91,9 +112,9 @@ func VerifyConfig(config *Config) error {
 	return nil
 }
 
-// Server is used to initialize a new server-side connection.
-// There must be at most one server-side connection. If a nil config is
-// provided, the DefaultConfiguration will be used.
+// Server wraps an io.ReadWriteCloser in a server-side Yamux session.
+// There must be at most one server-side session per underlying connection.
+// If config is nil, DefaultConfig() is used.
 func Server(conn io.ReadWriteCloser, config *Config) (*Session, error) {
 	if config == nil {
 		config = DefaultConfig()
@@ -104,8 +125,8 @@ func Server(conn io.ReadWriteCloser, config *Config) (*Session, error) {
 	return newSession(config, conn, false), nil
 }
 
-// Client is used to initialize a new client-side connection.
-// There must be at most one client-side connection.
+// Client wraps an io.ReadWriteCloser in a client-side Yamux session.
+// There must be at most one client-side session per underlying connection.
 func Client(conn io.ReadWriteCloser, config *Config) (*Session, error) {
 	if config == nil {
 		config = DefaultConfig()

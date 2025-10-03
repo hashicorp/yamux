@@ -46,7 +46,8 @@ jobs:
       uses: golangci/golangci-lint-action@08e2f20817b15149a52b5b3ebe7de50aff2ba8c5
     - name: Run test and generate coverage report
       run: |
-        go test -race -v -coverprofile=coverage.out ./...
+        # Include coverage for the library even when tests live in external packages
+        go test -race -v -covermode=atomic -coverpkg=./... -coverprofile=coverage.out ./...
     - name: Upload Coverage report
       uses: actions/upload-artifact@65462800fd760344b1a7b4382951275a0abb4808
       with: 

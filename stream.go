@@ -3,6 +3,7 @@ package yamux
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"io"
 	"sync"
 	"sync/atomic"
@@ -22,10 +23,10 @@ const (
 	streamReset
 )
 
-// Stream is used to represent a logical stream within a session. Methods on
-// Stream are safe to call concurrently with one another, but all Read calls
-// must be on the same goroutine and all Write calls must be on the same
-// goroutine.
+// Stream represents a logical stream within a Session. Methods are safe to
+// call concurrently with one another, but all Read calls must be on the same
+// goroutine and all Write calls must be on the same goroutine. Stream
+// implements net.Conn semantics including deadlines and half-close via FIN.
 type Stream struct {
 	recvWindow uint32
 	sendWindow uint32
@@ -61,8 +62,8 @@ type Stream struct {
 	closeTimer *time.Timer
 }
 
-// newStream is used to construct a new stream within
-// a given session for an ID
+// newStream constructs a new Stream within the given session for the provided
+// ID and initial state.
 func newStream(session *Session, id uint32, state streamState) *Stream {
 	s := &Stream{
 		id:           id,
@@ -83,27 +84,28 @@ func newStream(session *Session, id uint32, state streamState) *Stream {
 	return s
 }
 
-// Session returns the associated stream session
+// Session returns the owning Session.
 func (s *Stream) Session() *Session {
 	return s.session
 }
 
-// StreamID returns the ID of this stream
+// StreamID returns the numeric identifier of this stream.
 func (s *Stream) StreamID() uint32 {
 	return s.id
 }
 
-// Read is used to read from the stream. It is safe to call Write, Read, and/or
+// Read reads data from the stream. It is safe to call Write, Read, and/or
 // Close concurrently with each other, but calls to Read are not reentrant and
-// should not be called from multiple goroutines. Multiple Read goroutines would
-// receive different chunks of data from the Stream and be unable to reassemble
-// them in order or along message boundaries, and may encounter deadlocks.
+// must not be called from multiple goroutines. Multiple Read goroutines would
+// receive different chunks of data and be unable to reassemble them in order
+// or along message boundaries, and may deadlock.
 func (s *Stream) Read(b []byte) (n int, err error) {
 	defer asyncNotify(s.recvNotifyCh)
 START:
 
 	// If the stream is closed and there's no data buffered, return EOF
 	s.stateLock.Lock()
+	//goland:noinspection GoSwitchMissingCasesForIotaConsts
 	switch s.state {
 	case streamLocalClose:
 		// LocalClose only prohibits further local writes. Handle reads normally.
@@ -136,7 +138,7 @@ START:
 
 	// Send a window update potentially
 	err = s.sendWindowUpdate()
-	if err == ErrSessionShutdown {
+	if errors.Is(err, ErrSessionShutdown) {
 		err = nil
 	}
 	return n, err
@@ -185,10 +187,11 @@ func (s *Stream) Write(b []byte) (n int, err error) {
 // a short write.
 func (s *Stream) write(b []byte) (n int, err error) {
 	var flags uint16
-	var max uint32
+	var mMax uint32
 	var body []byte
 START:
 	s.stateLock.Lock()
+	//goland:noinspection GoSwitchMissingCasesForIotaConsts
 	switch s.state {
 	case streamLocalClose:
 		fallthrough
@@ -211,11 +214,11 @@ START:
 	flags = s.sendFlags()
 
 	// Send up to our send window
-	max = min(window, uint32(len(b)))
-	body = b[:max]
+	mMax = min(window, uint32(len(b)))
+	body = b[:mMax]
 
 	// Send the header
-	s.sendHdr.encode(typeData, flags, s.id, max)
+	s.sendHdr.encode(typeData, flags, s.id, mMax)
 	if err = s.session.waitForSendErr(s.sendHdr, body, s.sendErr); err != nil {
 		if errors.Is(err, ErrSessionShutdown) || errors.Is(err, ErrConnectionWriteTimeout) {
 			// Message left in ready queue, header re-use is unsafe.
@@ -225,10 +228,10 @@ START:
 	}
 
 	// Reduce our send window
-	atomic.AddUint32(&s.sendWindow, ^uint32(max-1))
+	atomic.AddUint32(&s.sendWindow, ^uint32(mMax-1))
 
 	// Unlock
-	return int(max), err
+	return int(mMax), err
 
 WAIT:
 	var timeout <-chan time.Time
@@ -259,6 +262,7 @@ func (s *Stream) sendFlags() uint16 {
 	s.stateLock.Lock()
 	defer s.stateLock.Unlock()
 	var flags uint16
+	//goland:noinspection GoSwitchMissingCasesForIotaConsts
 	switch s.state {
 	case streamInit:
 		flags |= flagSYN
@@ -277,19 +281,19 @@ func (s *Stream) sendWindowUpdate() error {
 	defer s.controlHdrLock.Unlock()
 
 	// Determine the delta update
-	max := s.session.config.MaxStreamWindowSize
+	windowSize := s.session.config.MaxStreamWindowSize
 	var bufLen uint32
 	s.recvLock.Lock()
 	if s.recvBuf != nil {
 		bufLen = uint32(s.recvBuf.Len())
 	}
-	delta := (max - bufLen) - s.recvWindow
+	delta := (windowSize - bufLen) - s.recvWindow
 
 	// Determine the flags if any
 	flags := s.sendFlags()
 
 	// Check if we can omit the update
-	if delta < (max/2) && flags == 0 {
+	if delta < (windowSize/2) && flags == 0 {
 		s.recvLock.Unlock()
 		return nil
 	}
@@ -328,7 +332,9 @@ func (s *Stream) sendClose() error {
 	return nil
 }
 
-// Close is used to close the stream. It is safe to call Close concurrently.
+// Close initiates a half-close (FIN) if the stream is established. If the
+// remote has already half-closed, Close completes the close and removes the
+// stream from the session. It is safe to call Close concurrently.
 func (s *Stream) Close() error {
 	closeStream := false
 	s.stateLock.Lock()
@@ -351,7 +357,8 @@ func (s *Stream) Close() error {
 	case streamClosed:
 	case streamReset:
 	default:
-		panic("unhandled state")
+		s.stateLock.Unlock()
+		return fmt.Errorf("unhandled state: %d", s.state)
 	}
 	s.stateLock.Unlock()
 	return nil
@@ -378,7 +385,7 @@ SEND_CLOSE:
 	}
 
 	s.stateLock.Unlock()
-	s.sendClose()
+	_ = s.sendClose()
 	s.notifyWaiting()
 	if closeStream {
 		s.session.closeStream(s.id)
@@ -403,11 +410,17 @@ func (s *Stream) closeTimeout() {
 	_ = s.session.sendNoWait(hdr)
 }
 
-// forceClose is used for when the session is exiting
+// forceClose forcefully transitions the stream to closed and notifies waiters.
 func (s *Stream) forceClose() {
 	s.stateLock.Lock()
 	s.state = streamClosed
+	if s.closeTimer != nil {
+		s.closeTimer.Stop()
+		s.closeTimer = nil
+	}
 	s.stateLock.Unlock()
+	// Opportunistically shrink buffers on close to reclaim memory.
+	s.Shrink()
 	s.notifyWaiting()
 }
 
@@ -446,10 +459,13 @@ func (s *Stream) processFlags(flags uint16) error {
 		case streamEstablished:
 			s.state = streamRemoteClose
 			s.notifyWaiting()
+			// Opportunistically shrink if we've consumed buffered data.
+			s.Shrink()
 		case streamLocalClose:
 			s.state = streamClosed
 			closeStream = true
 			s.notifyWaiting()
+			s.Shrink()
 		default:
 			s.session.logger.Printf("[ERR] yamux: unexpected FIN flag in state %d", s.state)
 			return ErrUnexpectedFlag
@@ -561,4 +577,11 @@ func (s *Stream) Shrink() {
 		s.recvBuf = nil
 	}
 	s.recvLock.Unlock()
+}
+
+// CloseWrite closes the local write side of the stream while keeping the read
+// side open, matching the semantics expected by users that probe for a
+// CloseWrite method (e.g., SOCKS5 implementations). It delegates to Close().
+func (s *Stream) CloseWrite() error {
+	return s.Close()
 }

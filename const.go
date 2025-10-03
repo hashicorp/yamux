@@ -5,7 +5,9 @@ import (
 	"fmt"
 )
 
-// NetError implements net.Error
+// NetError implements the net.Error interface and is used to signal
+// network-style conditions (e.g., timeouts). The timeout and temporary
+// flags control caller behavior such as retries and backoff.
 type NetError struct {
 	err       error
 	timeout   bool
@@ -25,98 +27,101 @@ func (e *NetError) Temporary() bool {
 }
 
 var (
-	// ErrInvalidVersion means we received a frame with an
-	// invalid version
+	// ErrInvalidVersion indicates a frame with an unsupported protocol version
+	// was received.
 	ErrInvalidVersion = fmt.Errorf("invalid protocol version")
 
-	// ErrInvalidMsgType means we received a frame with an
-	// invalid message type
+	// ErrInvalidMsgType indicates a frame carried an unknown/invalid
+	// message type.
 	ErrInvalidMsgType = fmt.Errorf("invalid msg type")
 
-	// ErrSessionShutdown is used if there is a shutdown during
-	// an operation
+	// ErrSessionShutdown is returned if the session is shutting down or is
+	// already closed while an operation is in flight.
 	ErrSessionShutdown = fmt.Errorf("session shutdown")
 
-	// ErrStreamsExhausted is returned if we have no more
-	// stream ids to issue
+	// ErrStreamsExhausted indicates there are no more stream IDs to issue for
+	// the current side (client/server).
 	ErrStreamsExhausted = fmt.Errorf("streams exhausted")
 
-	// ErrDuplicateStream is used if a duplicate stream is
-	// opened inbound
+	// ErrDuplicateStream indicates a duplicate inbound stream was declared.
 	ErrDuplicateStream = fmt.Errorf("duplicate stream initiated")
 
-	// ErrReceiveWindowExceeded indicates the window was exceeded
+	// ErrRecvWindowExceeded indicates the advertised receive window was exceeded.
 	ErrRecvWindowExceeded = fmt.Errorf("recv window exceeded")
 
-	// ErrTimeout is used when we reach an IO deadline
+	// ErrTimeout is returned when an I/O deadline is reached. In the context of
+	// Yamux flow control and backpressure, this can indicate that a write or
+	// read could not make forward progress within the configured deadline.
+	// Callers may interpret ErrTimeout as a signal of backpressure and
+	// implement retries or adaptive throttling as appropriate.
 	ErrTimeout = &NetError{
 		err: fmt.Errorf("i/o deadline reached"),
 
-		// Error should meet net.Error interface for timeouts for compatability
+		// Error should meet net.Error interface for timeouts for compatibility
 		// with standard library expectations, such as http servers.
 		timeout: true,
 	}
 
-	// ErrStreamClosed is returned when using a closed stream
+	// ErrStreamClosed indicates an operation attempted on a closed stream.
 	ErrStreamClosed = fmt.Errorf("stream closed")
 
-	// ErrUnexpectedFlag is set when we get an unexpected flag
+	// ErrUnexpectedFlag indicates a frame carried an unexpected flag for the
+	// current stream state.
 	ErrUnexpectedFlag = fmt.Errorf("unexpected flag")
 
-	// ErrRemoteGoAway is used when we get a go away from the other side
+	// ErrRemoteGoAway indicates the remote side sent a GoAway and is not
+	// accepting further streams.
 	ErrRemoteGoAway = fmt.Errorf("remote end is not accepting connections")
 
-	// ErrConnectionReset is sent if a stream is reset. This can happen
-	// if the backlog is exceeded, or if there was a remote GoAway.
+	// ErrConnectionReset indicates a stream was reset. This can happen if the
+	// backlog is exceeded or after a remote GoAway.
 	ErrConnectionReset = fmt.Errorf("connection reset")
 
-	// ErrConnectionWriteTimeout indicates that we hit the "safety valve"
-	// timeout writing to the underlying stream connection.
+	// ErrConnectionWriteTimeout indicates the per-write "safety valve"
+	// deadline was hit on the underlying connection.
 	ErrConnectionWriteTimeout = fmt.Errorf("connection write timeout")
 
-	// ErrKeepAliveTimeout is sent if a missed keepalive caused the stream close
+	// ErrKeepAliveTimeout indicates a missed keep-alive caused the session to
+	// close.
 	ErrKeepAliveTimeout = fmt.Errorf("keepalive timeout")
 )
 
 const (
-	// protoVersion is the only version we support
+	// protoVersion is the only protocol version supported by this library.
 	protoVersion uint8 = 0
 )
 
 const (
-	// Data is used for data frames. They are followed
-	// by length bytes worth of payload.
+	// typeData marks a data frame followed by Length bytes of payload.
 	typeData uint8 = iota
 
-	// WindowUpdate is used to change the window of
-	// a given stream. The length indicates the delta
-	// update to the window.
+	// typeWindowUpdate updates the receiver's window for a given stream. The
+	// Length field carries the delta.
 	typeWindowUpdate
 
-	// Ping is sent as a keep-alive or to measure
-	// the RTT. The StreamID and Length value are echoed
-	// back in the response.
+	// typePing is used for RTT measurement and keep-alive. The opaque Length
+	// value is echoed back in the response.
 	typePing
 
-	// GoAway is sent to terminate a session. The StreamID
-	// should be 0 and the length is an error code.
+	// typeGoAway terminates a session. StreamID must be 0 and Length carries
+	// an error code.
 	typeGoAway
 )
 
 const (
-	// SYN is sent to signal a new stream. May
-	// be sent with a data payload
+	// flagSYN signals the start of a new stream. May be sent with a data or
+	// window update payload.
 	flagSYN uint16 = 1 << iota
 
-	// ACK is sent to acknowledge a new stream. May
-	// be sent with a data payload
+	// flagACK acknowledges the start of a new stream. May be sent with a data
+	// or window update payload.
 	flagACK
 
-	// FIN is sent to half-close the given stream.
-	// May be sent with a data payload.
+	// flagFIN performs a half-close of the given stream. May be sent with a
+	// data or window update payload.
 	flagFIN
 
-	// RST is used to hard close a given stream.
+	// flagRST performs an immediate hard close of the given stream.
 	flagRST
 )
 
@@ -126,13 +131,13 @@ const (
 )
 
 const (
-	// goAwayNormal is sent on a normal termination
+	// goAwayNormal indicates a normal session termination.
 	goAwayNormal uint32 = iota
 
-	// goAwayProtoErr sent on a protocol error
+	// goAwayProtoErr indicates a protocol error.
 	goAwayProtoErr
 
-	// goAwayInternalErr sent on an internal error
+	// goAwayInternalErr indicates an internal error.
 	goAwayInternalErr
 )
 
@@ -146,33 +151,33 @@ const (
 		sizeOfStreamID + sizeOfLength
 )
 
+// header represents the 12-byte Yamux frame header backed by a byte slice.
+// All fields are encoded in network byte order (big-endian).
 type header []byte
 
-func (h header) Version() uint8 {
-	return h[0]
-}
+// Version returns the protocol version stored in the header.
+func (h header) Version() uint8 { return h[0] }
 
-func (h header) MsgType() uint8 {
-	return h[1]
-}
+// MsgType returns the message type stored in the header.
+func (h header) MsgType() uint8 { return h[1] }
 
-func (h header) Flags() uint16 {
-	return binary.BigEndian.Uint16(h[2:4])
-}
+// Flags returns the flags carried by the header.
+func (h header) Flags() uint16 { return binary.BigEndian.Uint16(h[2:4]) }
 
-func (h header) StreamID() uint32 {
-	return binary.BigEndian.Uint32(h[4:8])
-}
+// StreamID returns the stream identifier for the frame.
+func (h header) StreamID() uint32 { return binary.BigEndian.Uint32(h[4:8]) }
 
-func (h header) Length() uint32 {
-	return binary.BigEndian.Uint32(h[8:12])
-}
+// Length returns the Length field whose meaning is message-type dependent.
+func (h header) Length() uint32 { return binary.BigEndian.Uint32(h[8:12]) }
 
+// String returns a human-readable representation of the header.
 func (h header) String() string {
 	return fmt.Sprintf("Vsn:%d Type:%d Flags:%d StreamID:%d Length:%d",
 		h.Version(), h.MsgType(), h.Flags(), h.StreamID(), h.Length())
 }
 
+// encode writes the given values into the header in big-endian order. The
+// protocol version is always set to protoVersion.
 func (h header) encode(msgType uint8, flags uint16, streamID uint32, length uint32) {
 	h[0] = protoVersion
 	h[1] = msgType
