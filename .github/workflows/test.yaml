@@ -44,9 +44,12 @@ jobs:
         cache: true
     - name: Run golangci-lint
       uses: golangci/golangci-lint-action@08e2f20817b15149a52b5b3ebe7de50aff2ba8c5
-    - name: Run test and generate coverage report
+    - name: Run race detector tests (skip large data tests)
       run: |
-        go test -race -short -v -coverprofile=coverage.out ./...
+        go test -race -short -v ./...
+    - name: Run full test suite with coverage (no race detector)
+      run: |
+        go test -v -coverprofile=coverage.out ./...
     - name: Upload Coverage report
       uses: actions/upload-artifact@65462800fd760344b1a7b4382951275a0abb4808
       with: 
