@@ -17,9 +17,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - name: Checkout Code
-      uses: actions/checkout@ac593985615ec2ede58e132d2e21d2b1cbd6127c # v3.3.0
+      uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
     - name: Setup Go
-      uses: actions/setup-go@6edd4406fa81c3da01a34fa6f6343087c207a568 # v3.5.0
+      uses: actions/setup-go@4dc6199c7b1a012772edbd06daecab0f50c9053c # v6.1.0
       with:
         go-version: '1.23'
         cache: true
@@ -36,14 +36,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - name: Checkout Code
-      uses: actions/checkout@ac593985615ec2ede58e132d2e21d2b1cbd6127c # v3.3.0
+      uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
     - name: Setup Go
-      uses: actions/setup-go@6edd4406fa81c3da01a34fa6f6343087c207a568 # v3.5.0
+      uses: actions/setup-go@4dc6199c7b1a012772edbd06daecab0f50c9053c # v6.1.0
       with:
         go-version: '1.23'
         cache: true
     - name: Run golangci-lint
-      uses: golangci/golangci-lint-action@08e2f20817b15149a52b5b3ebe7de50aff2ba8c5
+      uses: golangci/golangci-lint-action@1e7e51e771db61008b38414a730f564565cf7c20
     - name: Run race detector tests (skip large data tests)
       run: |
         go test -race -short -v ./...
@@ -51,7 +51,7 @@ jobs:
       run: |
         go test -v -coverprofile=coverage.out ./...
     - name: Upload Coverage report
-      uses: actions/upload-artifact@65462800fd760344b1a7b4382951275a0abb4808
+      uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
       with: 
         path: coverage.out
         name: Coverage-report
