@@ -71,6 +71,24 @@ func (p *pipeConn) Close() error {
 	return p.writer.Close()
 }
 
+type blockedConn struct {
+	unblock chan struct{}
+}
+
+func (c *blockedConn) Read([]byte) (int, error) {
+	<-c.unblock
+	return 0, io.EOF
+}
+
+func (c *blockedConn) Write([]byte) (int, error) {
+	<-c.unblock
+	return 0, io.ErrClosedPipe
+}
+
+func (c *blockedConn) Close() error {
+	return nil
+}
+
 func testConnPipe(testing.TB) (io.ReadWriteCloser, io.ReadWriteCloser) {
 	read1, write1 := io.Pipe()
 	read2, write2 := io.Pipe()
@@ -1264,6 +1282,40 @@ func TestKeepAlive_Timeout(t *testing.T) {
 
 	if !serverLogs.match([]string{"[ERR] yamux: keepalive failed: i/o deadline reached"}) {
 		t.Fatalf("server log incorect: %v", serverLogs.logs())
+	}
+}
+
+func TestKeepAlive_TimeoutCloseDoesNotBlock(t *testing.T) {
+	conf := testConf()
+	conf.KeepAliveInterval = 10 * time.Millisecond
+	conf.ConnectionWriteTimeout = 20 * time.Millisecond
+	_ = captureLogs(conf)
+
+	conn := &blockedConn{unblock: make(chan struct{})}
+	session, err := Server(conn, conf)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	t.Cleanup(func() { close(conn.unblock) })
+
+	select {
+	case <-session.CloseChan():
+	case <-time.After(5 * conf.ConnectionWriteTimeout):
+		t.Fatalf("timeout waiting for keepalive shutdown")
+	}
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- session.Close()
+	}()
+
+	select {
+	case err := <-errCh:
+		if err != nil {
+			t.Fatalf("unexpected close error: %v", err)
+		}
+	case <-time.After(5 * conf.ConnectionWriteTimeout):
+		t.Fatalf("Close blocked after keepalive shutdown")
 	}
 }
 
