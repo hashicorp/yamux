@@ -22,11 +22,11 @@ import (
 // multiplex it into multiple streams.
 type Session struct {
 	// remoteGoAway indicates the remote side does
-	// not want futher connections. Must be first for alignment.
+	// not want further connections. Must be first for alignment.
 	remoteGoAway int32
 
 	// localGoAway indicates that we should stop
-	// accepting futher connections. Must be first for alignment.
+	// accepting further connections. Must be first for alignment.
 	localGoAway int32
 
 	// nextStreamID is the next stream we should
