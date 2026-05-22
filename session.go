@@ -270,45 +270,58 @@ func (s *Session) AcceptStreamWithContext(ctx context.Context) (*Stream, error) 
 }
 
 // Close is used to close the session and all streams.
-// Attempts to send a GoAway before closing the connection.
 func (s *Session) Close() error {
+	if !s.startShutdown(ErrSessionShutdown) {
+		return nil
+	}
+
+	s.conn.Close()
+	<-s.recvDoneCh
+	s.forceCloseStreams()
+	<-s.sendDoneCh
+	return nil
+}
+
+// startShutdown marks the session as shutting down and closes
+// shutdownCh once. The caller that wins this race is responsible
+// for completing the rest of the shutdown work.
+func (s *Session) startShutdown(err error) bool {
 	s.shutdownLock.Lock()
 	defer s.shutdownLock.Unlock()
 
 	if s.shutdown {
-		return nil
+		return false
 	}
 	s.shutdown = true
 
 	s.shutdownErrLock.Lock()
 	if s.shutdownErr == nil {
-		s.shutdownErr = ErrSessionShutdown
+		s.shutdownErr = err
 	}
 	s.shutdownErrLock.Unlock()
 
 	close(s.shutdownCh)
+	return true
+}
 
-	s.conn.Close()
-	<-s.recvDoneCh
-
+// forceCloseStreams is used to close all streams on session shutdown.
+func (s *Session) forceCloseStreams() {
 	s.streamLock.Lock()
 	defer s.streamLock.Unlock()
 	for _, stream := range s.streams {
 		stream.forceClose()
 	}
-	<-s.sendDoneCh
-	return nil
 }
 
 // exitErr is used to handle an error that is causing the
-// session to terminate.
+// session to terminate. It closes the underlying connection
+// directly instead of calling Close again.
 func (s *Session) exitErr(err error) {
-	s.shutdownErrLock.Lock()
-	if s.shutdownErr == nil {
-		s.shutdownErr = err
+	if !s.startShutdown(err) {
+		return
 	}
-	s.shutdownErrLock.Unlock()
-	s.Close()
+	s.conn.Close()
+	s.forceCloseStreams()
 }
 
 // GoAway can be used to prevent accepting further
