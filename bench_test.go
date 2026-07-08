@@ -1,4 +1,4 @@
-// Copyright IBM Corp. 2014, 2025
+// Copyright IBM Corp. 2014, 2026
 // SPDX-License-Identifier: MPL-2.0
 
 package yamux
@@ -41,7 +41,7 @@ func BenchmarkAccept(b *testing.B) {
 			if err != nil {
 				return
 			}
-			stream.Close()
+			_ = stream.Close()
 		}
 	}()
 
@@ -50,7 +50,7 @@ func BenchmarkAccept(b *testing.B) {
 		if err != nil {
 			b.Fatalf("err: %v", err)
 		}
-		stream.Close()
+		_ = stream.Close()
 	}
 	<-doneCh
 }
@@ -118,7 +118,7 @@ func benchmarkSendRecv(b *testing.B, sendSize, recvSize int) {
 			errCh <- err
 			return
 		}
-		defer stream.Close()
+		defer func() { _ = stream.Close() }()
 
 		switch {
 		case sendSize == recvSize:
@@ -151,7 +151,7 @@ func benchmarkSendRecv(b *testing.B, sendSize, recvSize int) {
 	if err != nil {
 		b.Fatalf("err: %v", err)
 	}
-	defer stream.Close()
+	defer func() { _ = stream.Close() }()
 
 	for i := 0; i < b.N; i++ {
 		if _, err := stream.Write(sendBuf); err != nil {
@@ -219,7 +219,7 @@ func benchmarkSendRecvParallel(b *testing.B, sendSize int) {
 				errCh <- err
 				return
 			}
-			defer stream.Close()
+			defer func() { _ = stream.Close() }()
 
 			if _, err := discarder.ReadFrom(stream); err != nil {
 				errCh <- err
@@ -239,7 +239,7 @@ func benchmarkSendRecvParallel(b *testing.B, sendSize int) {
 			}
 		}
 
-		stream.Close()
+		_ = stream.Close()
 
 		drainErrorsUntil(b, errCh, 1, 0, "")
 	})
