@@ -1,4 +1,4 @@
-// Copyright IBM Corp. 2014, 2025
+// Copyright IBM Corp. 2014, 2026
 // SPDX-License-Identifier: MPL-2.0
 
 package yamux
@@ -67,7 +67,7 @@ func (p *pipeConn) Write(b []byte) (int, error) {
 }
 
 func (p *pipeConn) Close() error {
-	p.reader.Close()
+	_ = p.reader.Close()
 	return p.writer.Close()
 }
 
@@ -338,7 +338,7 @@ func TestCloseBeforeAck(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			s.Close()
+			_ = s.Close()
 		}
 
 		for i := 0; i < 8; i++ {
@@ -346,7 +346,7 @@ func TestCloseBeforeAck(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			s.Close()
+			_ = s.Close()
 		}
 
 		errCh := make(chan error, 1)
@@ -356,7 +356,7 @@ func TestCloseBeforeAck(t *testing.T) {
 				errCh <- err
 				return
 			}
-			s.Close()
+			_ = s.Close()
 			errCh <- nil
 		}()
 
@@ -510,7 +510,7 @@ func TestClose_closeTimeout(t *testing.T) {
 
 func TestNonNilInterface(t *testing.T) {
 	_, server := testClientServer(t)
-	server.Close()
+	_ = server.Close()
 
 	conn, err := server.Accept()
 	if err == nil || !errors.Is(err, ErrSessionShutdown) || conn != nil {
@@ -723,7 +723,7 @@ func TestManyStreams(t *testing.T) {
 			errCh <- err
 			return
 		}
-		defer stream.Close()
+		defer func() { _ = stream.Close() }()
 
 		buf := make([]byte, 512)
 		for {
@@ -748,7 +748,7 @@ func TestManyStreams(t *testing.T) {
 			errCh <- err
 			return
 		}
-		defer stream.Close()
+		defer func() { _ = stream.Close() }()
 
 		msg := fmt.Sprintf("%08d", id)
 		for i := 0; i < 1000; i++ {
@@ -789,7 +789,7 @@ func TestManyStreams_PingPong(t *testing.T) {
 			errCh <- err
 			return
 		}
-		defer stream.Close()
+		defer func() { _ = stream.Close() }()
 
 		buf := make([]byte, 4)
 		for {
@@ -833,7 +833,7 @@ func TestManyStreams_PingPong(t *testing.T) {
 			errCh <- err
 			return
 		}
-		defer stream.Close()
+		defer func() { _ = stream.Close() }()
 
 		buf := make([]byte, 4)
 		for i := 0; i < 1000; i++ {
@@ -894,7 +894,7 @@ func TestHalfClose(t *testing.T) {
 		if err != nil {
 			t.Fatalf("err: %v", err)
 		}
-		serverStream.Close() // Half close
+		_ = serverStream.Close() // Half close
 
 		// Server reads 1 byte written by Client
 		buf := make([]byte, 4)
@@ -910,7 +910,7 @@ func TestHalfClose(t *testing.T) {
 		if _, err = clientStream.Write([]byte("bcd")); err != nil {
 			t.Fatalf("err: %v", err)
 		}
-		clientStream.Close()
+		_ = clientStream.Close()
 
 		// Read after close always returns the bytes written but may or may not
 		// receive the EOF.
@@ -994,13 +994,13 @@ func TestReadDeadline(t *testing.T) {
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
-	defer stream.Close()
+	defer func() { _ = stream.Close() }()
 
 	stream2, err := server.Accept()
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
-	defer stream2.Close()
+	defer func() { _ = stream2.Close() }()
 
 	if err := stream.SetReadDeadline(time.Now().Add(5 * time.Millisecond)); err != nil {
 		t.Fatalf("err: %v", err)
@@ -1037,13 +1037,13 @@ func TestReadDeadline_BlockedRead(t *testing.T) {
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
-	defer stream.Close()
+	defer func() { _ = stream.Close() }()
 
 	stream2, err := server.Accept()
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
-	defer stream2.Close()
+	defer func() { _ = stream2.Close() }()
 
 	// Start a read that will block
 	errCh := make(chan error, 1)
@@ -1079,13 +1079,13 @@ func TestWriteDeadline(t *testing.T) {
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
-	defer stream.Close()
+	defer func() { _ = stream.Close() }()
 
 	stream2, err := server.Accept()
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
-	defer stream2.Close()
+	defer func() { _ = stream2.Close() }()
 
 	if err := stream.SetWriteDeadline(time.Now().Add(50 * time.Millisecond)); err != nil {
 		t.Fatalf("err: %v", err)
@@ -1110,13 +1110,13 @@ func TestWriteDeadline_BlockedWrite(t *testing.T) {
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
-	defer stream.Close()
+	defer func() { _ = stream.Close() }()
 
 	stream2, err := server.Accept()
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
-	defer stream2.Close()
+	defer func() { _ = stream2.Close() }()
 
 	// Start a goroutine making writes that will block
 	errCh := make(chan error, 1)
@@ -1164,7 +1164,7 @@ func TestBacklogExceeded(t *testing.T) {
 		if err != nil {
 			t.Fatalf("err: %v", err)
 		}
-		defer stream.Close()
+		defer func() { _ = stream.Close() }()
 
 		if _, err := stream.Write([]byte("foo")); err != nil {
 			t.Fatalf("err: %v", err)
@@ -1181,7 +1181,7 @@ func TestBacklogExceeded(t *testing.T) {
 	// Shutdown the server
 	go func() {
 		time.Sleep(10 * time.Millisecond)
-		server.Close()
+		_ = server.Close()
 	}()
 
 	select {
@@ -1227,7 +1227,7 @@ func TestKeepAlive_Timeout(t *testing.T) {
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	serverConf := testConf()
 	serverLogs := captureLogs(serverConf)
@@ -1235,7 +1235,7 @@ func TestKeepAlive_Timeout(t *testing.T) {
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
-	defer server.Close()
+	defer func() { _ = server.Close() }()
 
 	errCh := make(chan error, 1)
 	go func() {
@@ -1278,13 +1278,13 @@ func TestLargeWindow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
-	defer stream.Close()
+	defer func() { _ = stream.Close() }()
 
 	stream2, err := server.Accept()
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
-	defer stream2.Close()
+	defer func() { _ = stream2.Close() }()
 
 	err = stream.SetWriteDeadline(time.Now().Add(10 * time.Millisecond))
 	if err != nil {
@@ -1314,7 +1314,7 @@ func TestSendData_VeryLarge(t *testing.T) {
 	client, server := testClientServer(t)
 
 	var n int64 = 1 * 1024 * 1024 * 1024
-	var workers int = 16
+	var workers = 16
 
 	errCh := make(chan error, workers*2)
 
@@ -1325,7 +1325,7 @@ func TestSendData_VeryLarge(t *testing.T) {
 				errCh <- err
 				return
 			}
-			defer stream.Close()
+			defer func() { _ = stream.Close() }()
 
 			buf := make([]byte, 4)
 			_, err = stream.Read(buf)
@@ -1358,7 +1358,7 @@ func TestSendData_VeryLarge(t *testing.T) {
 				errCh <- err
 				return
 			}
-			defer stream.Close()
+			defer func() { _ = stream.Close() }()
 
 			_, err = stream.Write([]byte{0, 1, 2, 3})
 			if err != nil {
@@ -1397,7 +1397,7 @@ func TestBacklogExceeded_Accept(t *testing.T) {
 				errCh <- err
 				return
 			}
-			defer stream.Close()
+			defer func() { _ = stream.Close() }()
 			errCh <- nil
 		}
 	}()
@@ -1408,7 +1408,7 @@ func TestBacklogExceeded_Accept(t *testing.T) {
 		if err != nil {
 			t.Fatalf("err: %v", err)
 		}
-		defer stream.Close()
+		defer func() { _ = stream.Close() }()
 
 		if _, err := stream.Write([]byte("foo")); err != nil {
 			t.Fatalf("err: %v", err)
@@ -1436,7 +1436,7 @@ func TestSession_WindowUpdateWriteDuringRead(t *testing.T) {
 			errCh <- err
 			return
 		}
-		defer stream.Close()
+		defer func() { _ = stream.Close() }()
 
 		n, err := stream.Write(make([]byte, flood))
 		if err != nil {
@@ -1459,7 +1459,7 @@ func TestSession_WindowUpdateWriteDuringRead(t *testing.T) {
 			errCh <- err
 			return
 		}
-		defer stream.Close()
+		defer func() { _ = stream.Close() }()
 
 		conn := clientConn.(*pipeConn)
 		conn.writeBlocker.Lock()
@@ -1499,7 +1499,7 @@ func TestSession_PartialReadWindowUpdate(t *testing.T) {
 				errCh <- err
 				return
 			}
-			defer wr.Close()
+			defer func() { _ = wr.Close() }()
 
 			window := atomic.LoadUint32(&wr.sendWindow)
 			if window != client.config.MaxStreamWindowSize {
@@ -1528,7 +1528,7 @@ func TestSession_PartialReadWindowUpdate(t *testing.T) {
 		if err != nil {
 			t.Fatalf("err: %v", err)
 		}
-		defer stream.Close()
+		defer func() { _ = stream.Close() }()
 
 		drainErrorsUntil(t, errCh, 1, 0, "")
 
@@ -1565,7 +1565,7 @@ func TestSession_sendNoWait_Timeout(t *testing.T) {
 			errCh <- err
 			return
 		}
-		defer stream.Close()
+		defer func() { _ = stream.Close() }()
 		errCh <- nil
 	}()
 
@@ -1577,7 +1577,7 @@ func TestSession_sendNoWait_Timeout(t *testing.T) {
 			errCh <- err
 			return
 		}
-		defer stream.Close()
+		defer func() { _ = stream.Close() }()
 
 		conn := clientConn.(*pipeConn)
 		conn.writeBlocker.Lock()
@@ -1624,7 +1624,7 @@ func TestSession_PingOfDeath(t *testing.T) {
 			errCh <- err
 			return
 		}
-		defer stream.Close()
+		defer func() { _ = stream.Close() }()
 
 		conn.writeBlocker.Lock()
 		for {
@@ -1654,7 +1654,7 @@ func TestSession_PingOfDeath(t *testing.T) {
 			errCh <- err
 			return
 		}
-		defer stream.Close()
+		defer func() { _ = stream.Close() }()
 
 		// This ping will never unblock because the ping id will never
 		// show up in a response.
@@ -1690,7 +1690,7 @@ func TestSession_ConnectionWriteTimeout(t *testing.T) {
 			errCh <- err
 			return
 		}
-		defer stream.Close()
+		defer func() { _ = stream.Close() }()
 		errCh <- nil
 	}()
 
@@ -1702,7 +1702,7 @@ func TestSession_ConnectionWriteTimeout(t *testing.T) {
 			errCh <- err
 			return
 		}
-		defer stream.Close()
+		defer func() { _ = stream.Close() }()
 
 		conn := clientConn.(*pipeConn)
 		conn.writeBlocker.Lock()
@@ -1741,7 +1741,7 @@ func TestCancelAccept(t *testing.T) {
 		}
 
 		if stream != nil {
-			defer stream.Close()
+			defer func() { _ = stream.Close() }()
 		}
 		errCh <- nil
 	}()

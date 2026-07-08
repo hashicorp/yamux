@@ -1,4 +1,4 @@
-// Copyright IBM Corp. 2014, 2025
+// Copyright IBM Corp. 2014, 2026
 // SPDX-License-Identifier: MPL-2.0
 
 package yamux
@@ -225,7 +225,7 @@ func (s *Session) setOpenTimeout(stream *Stream) {
 		// Timeout reached while waiting for ACK.
 		// Close the session to force connection re-establishment.
 		s.logger.Printf("[ERR] yamux: aborted stream open (destination=%s): %v", s.RemoteAddr().String(), ErrTimeout.err)
-		s.Close()
+		_ = s.Close()
 	}
 }
 
@@ -288,7 +288,7 @@ func (s *Session) Close() error {
 
 	close(s.shutdownCh)
 
-	s.conn.Close()
+	_ = s.conn.Close()
 	<-s.recvDoneCh
 
 	s.streamLock.Lock()
@@ -308,7 +308,7 @@ func (s *Session) exitErr(err error) {
 		s.shutdownErr = err
 	}
 	s.shutdownErrLock.Unlock()
-	s.Close()
+	_ = s.Close()
 }
 
 // GoAway can be used to prevent accepting further
