@@ -4,6 +4,9 @@
 package yamux
 
 import (
+	"errors"
+	"net"
+	"os"
 	"testing"
 )
 
@@ -71,5 +74,24 @@ func TestEncodeDecode(t *testing.T) {
 	}
 	if hdr.Length() != 4321 {
 		t.Fatalf("bad: %v", hdr)
+	}
+}
+
+func TestErrTimeoutNetErrorContract(t *testing.T) {
+	if ErrTimeout.Error() != "i/o deadline reached" {
+		t.Fatalf("Error() string changed: %q", ErrTimeout.Error())
+	}
+	if !ErrTimeout.Timeout() {
+		t.Fatalf("Timeout() should be true")
+	}
+	if !ErrTimeout.Temporary() {
+		t.Fatalf("Temporary() should be true for stdlib crypto/tls / http")
+	}
+	if !errors.Is(ErrTimeout, os.ErrDeadlineExceeded) {
+		t.Fatalf("expected errors.Is(ErrTimeout, os.ErrDeadlineExceeded)")
+	}
+	var ne net.Error
+	if !errors.As(ErrTimeout, &ne) || !ne.Timeout() {
+		t.Fatalf("expected net.Error with Timeout")
 	}
 }

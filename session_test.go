@@ -4,6 +4,7 @@
 package yamux
 
 import (
+	"os"
 	"bytes"
 	"context"
 	"crypto/tls"
@@ -1027,6 +1028,14 @@ func TestReadDeadline(t *testing.T) {
 	// library's http server implementation.
 	if netErr, ok := err.(net.Error); !ok || !netErr.Timeout() {
 		t.Fatalf("reading timeout error is expected to implement net.Error and return true when calling Timeout()")
+	}
+	// crypto/tls also requires Temporary() == true for deadline errors
+	// so hijacked connections are not torn down (#156).
+	if netErr, ok := err.(net.Error); !ok || !netErr.Temporary() {
+		t.Fatalf("reading timeout error is expected to return true when calling Temporary()")
+	}
+	if !errors.Is(err, os.ErrDeadlineExceeded) {
+		t.Fatalf("expected errors.Is(err, os.ErrDeadlineExceeded); got %v", err)
 	}
 }
 
