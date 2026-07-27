@@ -6,6 +6,7 @@ package yamux
 import (
 	"encoding/binary"
 	"fmt"
+	"os"
 )
 
 // NetError implements net.Error
@@ -26,6 +27,18 @@ func (e *NetError) Timeout() bool {
 func (e *NetError) Temporary() bool {
 	return e.temporary
 }
+
+// Unwrap exposes the underlying error for errors.Is / errors.As.
+func (e *NetError) Unwrap() error {
+	return e.err
+}
+
+// deadlineReached keeps Error() == "i/o deadline reached" while unwrapping to
+// os.ErrDeadlineExceeded for net.Conn contract compatibility.
+type deadlineReached struct{}
+
+func (deadlineReached) Error() string { return "i/o deadline reached" }
+func (deadlineReached) Unwrap() error { return os.ErrDeadlineExceeded }
 
 var (
 	// ErrInvalidVersion means we received a frame with an
@@ -53,11 +66,15 @@ var (
 
 	// ErrTimeout is used when we reach an IO deadline
 	ErrTimeout = &NetError{
-		err: fmt.Errorf("i/o deadline reached"),
+		// Message stays "i/o deadline reached"; also wraps
+		// os.ErrDeadlineExceeded and reports Temporary so crypto/tls
+		// and net/http treat deadline reads as non-fatal (see #156).
+		err: deadlineReached{},
 
 		// Error should meet net.Error interface for timeouts for compatability
 		// with standard library expectations, such as http servers.
-		timeout: true,
+		timeout:   true,
+		temporary: true,
 	}
 
 	// ErrStreamClosed is returned when using a closed stream
