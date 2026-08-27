@@ -1,3 +1,7 @@
+### Contributor Checklist
+- [ ] **LLM Usage** If an LLM was used to generate any code, please ensure and confirm you have read
+  and followed the [AI usage guide](../CONTRIBUTING.md#ai-usage).
+
 ## PCI review checklist
 
 <!-- heimdall_github_prtemplate:grc-pci_dss-2024-01-05 -->
