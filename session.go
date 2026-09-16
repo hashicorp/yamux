@@ -685,9 +685,6 @@ func (s *Session) incomingStream(id uint32) error {
 		return s.sendNoWait(hdr)
 	}
 
-	// Allocate a new stream
-	stream := newStream(s, id, streamSYNReceived)
-
 	s.streamLock.Lock()
 	defer s.streamLock.Unlock()
 
@@ -699,6 +696,9 @@ func (s *Session) incomingStream(id uint32) error {
 		}
 		return ErrDuplicateStream
 	}
+
+	// Allocate a new stream
+	stream := newStream(s, id, streamSYNReceived)
 
 	// Register the stream
 	s.streams[id] = stream

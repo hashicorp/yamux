@@ -1775,3 +1775,26 @@ func drainErrorsUntil(t testing.TB, errCh chan error, expect int, timeout time.D
 	}
 	t.Logf("drain took %v (timeout was %v)", time.Since(start), timeout)
 }
+
+func TestIncomingStream_Duplicate(t *testing.T) {
+	client, server := testClientServer(t)
+	defer client.Close()
+	defer server.Close()
+
+	stream, err := client.OpenStream()
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	defer stream.Close()
+
+	serverStream, err := server.AcceptStream()
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	defer serverStream.Close()
+
+	err = server.incomingStream(stream.StreamID())
+	if err != ErrDuplicateStream {
+		t.Fatalf("expected ErrDuplicateStream, got %v", err)
+	}
+}
