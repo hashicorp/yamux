@@ -685,13 +685,10 @@ func (s *Session) incomingStream(id uint32) error {
 		return s.sendNoWait(hdr)
 	}
 
-	// Allocate a new stream
-	stream := newStream(s, id, streamSYNReceived)
-
 	s.streamLock.Lock()
 	defer s.streamLock.Unlock()
 
-	// Check if stream already exists
+	// Check if stream already exists before allocating
 	if _, ok := s.streams[id]; ok {
 		s.logger.Printf("[ERR] yamux: duplicate stream declared")
 		if sendErr := s.sendNoWait(s.goAway(goAwayProtoErr)); sendErr != nil {
@@ -700,7 +697,8 @@ func (s *Session) incomingStream(id uint32) error {
 		return ErrDuplicateStream
 	}
 
-	// Register the stream
+	// Allocate and register the stream
+	stream := newStream(s, id, streamSYNReceived)
 	s.streams[id] = stream
 
 	// Check if we've exceeded the backlog
