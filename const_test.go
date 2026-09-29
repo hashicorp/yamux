@@ -4,6 +4,8 @@
 package yamux
 
 import (
+	"errors"
+	"os"
 	"testing"
 )
 
@@ -71,5 +73,20 @@ func TestEncodeDecode(t *testing.T) {
 	}
 	if hdr.Length() != 4321 {
 		t.Fatalf("bad: %v", hdr)
+	}
+}
+
+func TestErrTimeoutNetErrorContract(t *testing.T) {
+	if ErrTimeout.Error() != "i/o deadline reached" {
+		t.Fatalf("Error() = %q; want %q", ErrTimeout.Error(), "i/o deadline reached")
+	}
+	if !errors.Is(ErrTimeout, os.ErrDeadlineExceeded) {
+		t.Fatalf("errors.Is(ErrTimeout, os.ErrDeadlineExceeded) = false")
+	}
+	if !ErrTimeout.Timeout() {
+		t.Fatalf("Timeout() = false")
+	}
+	if !ErrTimeout.Temporary() {
+		t.Fatalf("Temporary() = false")
 	}
 }
