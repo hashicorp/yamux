@@ -1775,3 +1775,146 @@ func drainErrorsUntil(t testing.TB, errCh chan error, expect int, timeout time.D
 	}
 	t.Logf("drain took %v (timeout was %v)", time.Since(start), timeout)
 }
+
+func TestStreamCloseChan_SessionClose(t *testing.T) {
+	client, server := testClientServer()
+	defer client.Close()
+	var wg sync.WaitGroup
+	// server runs in the background and closes the stream as soon as received.
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		_, err := server.AcceptStream()
+		if err != nil {
+			t.Fatalf("err: %v", err)
+		}
+		time.Sleep(time.Second)
+		server.Close()
+	}()
+	go func() {
+		defer wg.Done()
+		stream, err := client.OpenStream()
+		if err != nil {
+			t.Fatalf("err: %v", err)
+		}
+		defer stream.Close()
+		// wait for close
+		select {
+		case <-stream.CloseChan():
+		case <-time.After(time.Second * 2):
+			t.Fatalf("err: closeChan is open, state=%d", stream.state)
+		}
+	}()
+	wg.Wait()
+}
+
+func TestStreamCloseChan_StreamClose(t *testing.T) {
+	client, server := testClientServer()
+	defer client.Close()
+	defer server.Close()
+	var wg sync.WaitGroup
+	// server runs in the background and closes the stream as soon as received.
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		stream, err := client.AcceptStream()
+		if err != nil {
+			t.Fatalf("err: %v", err)
+		}
+		b := []byte("close")
+		_, err = stream.Read(b)
+		if err != nil {
+			t.Fatalf("err: %v", err)
+		}
+		t.Logf("C: <- %s", string(b))
+		_, err = stream.Write(b)
+		if err != nil {
+			t.Fatalf("err: %v", err)
+		}
+		t.Logf("C: -> %s", string(b))
+		stream.Close()
+		t.Log("C: closed")
+	}()
+
+	go func() {
+		defer wg.Done()
+		stream, err := server.OpenStream()
+		if err != nil {
+			t.Fatalf("err: %v", err)
+		}
+		b := []byte("close")
+		stream.Write(b)
+		t.Logf("S: -> %s", string(b))
+		<-time.After(time.Second)
+		n, err := stream.Read(b)
+		if err != nil {
+			t.Fatalf("err: %v", err)
+		}
+		if n != len(b) {
+			t.Fatal("err: length mismatch")
+		}
+		t.Logf("S: <- %s", string(b))
+		stream.Read(b)
+
+		// check for close
+		select {
+		case <-stream.CloseChan():
+		default:
+			t.Fatalf("err: closeChan is open, state=%d", stream.state)
+		}
+	}()
+	wg.Wait()
+}
+
+func TestStreamCloseChan_StreamClose_WithFullBuffer(t *testing.T) {
+	client, server := testClientServer()
+	defer client.Close()
+	defer server.Close()
+	var wg sync.WaitGroup
+	// server runs in the background and closes the stream as soon as received.
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		stream, err := client.AcceptStream()
+		if err != nil {
+			t.Fatalf("err: %v", err)
+		}
+		b := []byte("close")
+		_, err = stream.Read(b)
+		if err != nil {
+			t.Fatalf("err: %v", err)
+		}
+		_, err = stream.Write(b)
+		if err != nil {
+			t.Fatalf("err: %v", err)
+		}
+		stream.Close()
+	}()
+	go func() {
+		defer wg.Done()
+		stream, err := server.OpenStream()
+		if err != nil {
+			t.Fatalf("err: %v", err)
+		}
+		b := []byte("close")
+		stream.Write(b)
+		<-time.After(time.Second)
+		for i := 0; i < 3; i++ {
+			n, err := stream.Read(b)
+			if err != nil && err != io.EOF {
+				t.Fatalf("err: %v", err)
+			}
+			if err != io.EOF && n != len(b) {
+				t.Fatal("err: length mismatch")
+			}
+		}
+
+		// closeChan should be closed when io.EOF is encountered.
+		select {
+		case <-stream.CloseChan():
+		default:
+			t.Fatalf("err: closeChan is open, state=%d", stream.state)
+		}
+	}()
+	wg.Wait()
+}
