@@ -485,16 +485,6 @@ func (s *Session) sendLoop() error {
 
 		select {
 		case ready := <-s.sendCh:
-			// Send a header if ready
-			if ready.Hdr != nil {
-				_, err := s.conn.Write(ready.Hdr)
-				if err != nil {
-					s.logger.Printf("[ERR] yamux: Failed to write header: %v", err)
-					asyncSendErr(ready.Err, err)
-					return err
-				}
-			}
-
 			ready.mu.Lock()
 			if ready.Body != nil {
 				// Copy the body into the buffer to avoid
@@ -511,8 +501,23 @@ func (s *Session) sendLoop() error {
 			}
 			ready.mu.Unlock()
 
-			if bodyBuf.Len() > 0 {
-				// Send data from a body if given
+			// Send header and body using vectored I/O if both are present
+			if ready.Hdr != nil && bodyBuf.Len() > 0 {
+				bufs := net.Buffers{ready.Hdr, bodyBuf.Bytes()}
+				_, err := bufs.WriteTo(s.conn)
+				if err != nil {
+					s.logger.Printf("[ERR] yamux: Failed to write header and body: %v", err)
+					asyncSendErr(ready.Err, err)
+					return err
+				}
+			} else if ready.Hdr != nil {
+				_, err := s.conn.Write(ready.Hdr)
+				if err != nil {
+					s.logger.Printf("[ERR] yamux: Failed to write header: %v", err)
+					asyncSendErr(ready.Err, err)
+					return err
+				}
+			} else if bodyBuf.Len() > 0 {
 				_, err := s.conn.Write(bodyBuf.Bytes())
 				if err != nil {
 					s.logger.Printf("[ERR] yamux: Failed to write body: %v", err)
