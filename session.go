@@ -45,6 +45,10 @@ type Session struct {
 	// bufRead is a buffered reader
 	bufRead *bufio.Reader
 
+	// recvScratch holds a data frame's body while recvLoop reads it, so no
+	// stream lock is held across network I/O. Only recvLoop touches it.
+	recvScratch []byte
+
 	// pings is used to track inflight pings
 	pings    map[uint32]chan struct{}
 	pingID   uint32

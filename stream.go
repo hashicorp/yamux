@@ -497,32 +497,34 @@ func (s *Stream) readData(hdr header, flags uint16, conn io.Reader) error {
 		return nil
 	}
 
-	// Wrap in a limited reader
-	conn = &io.LimitedReader{R: conn, N: int64(length)}
-
-	// Copy into buffer
+	// Only this goroutine shrinks the window, so it cannot close up again
+	// between this check and the append below.
 	s.recvLock.Lock()
-
-	if length > s.recvWindow {
-		s.session.logger.Printf("[ERR] yamux: receive window exceeded (stream: %d, remain: %d, recv: %d)", s.id, s.recvWindow, length)
-		s.recvLock.Unlock()
+	window := s.recvWindow
+	s.recvLock.Unlock()
+	if length > window {
+		s.session.logger.Printf("[ERR] yamux: receive window exceeded (stream: %d, remain: %d, recv: %d)", s.id, window, length)
 		return ErrRecvWindowExceeded
 	}
 
-	if s.recvBuf == nil {
-		// Allocate the receive buffer just-in-time to fit the full data frame.
-		// This way we can read in the whole packet without further allocations.
-		s.recvBuf = bytes.NewBuffer(make([]byte, 0, length))
+	// Read the body before taking recvLock. Holding it across a slow body
+	// left Read stuck on the mutex, deaf to its deadline and to shutdown.
+	if uint32(cap(s.session.recvScratch)) < length {
+		s.session.recvScratch = make([]byte, length)
 	}
-	copiedLength, err := io.Copy(s.recvBuf, conn)
-	if err != nil {
+	body := s.session.recvScratch[:length]
+	if _, err := io.ReadFull(conn, body); err != nil {
 		s.session.logger.Printf("[ERR] yamux: Failed to read stream data: %v", err)
-		s.recvLock.Unlock()
 		return err
 	}
 
-	// Decrement the receive window
-	s.recvWindow -= uint32(copiedLength)
+	s.recvLock.Lock()
+	if s.recvBuf == nil {
+		// Allocate the receive buffer just-in-time to fit the full data frame.
+		s.recvBuf = bytes.NewBuffer(make([]byte, 0, length))
+	}
+	s.recvBuf.Write(body)
+	s.recvWindow -= length
 	s.recvLock.Unlock()
 
 	// Unblock any readers

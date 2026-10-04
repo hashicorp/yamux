@@ -1775,3 +1775,49 @@ func drainErrorsUntil(t testing.TB, errCh chan error, expect int, timeout time.D
 	}
 	t.Logf("drain took %v (timeout was %v)", time.Since(start), timeout)
 }
+
+func TestSession_SlowBodyDoesNotBlockRead(t *testing.T) {
+	conn, raw := net.Pipe()
+	defer raw.Close()
+	go io.Copy(io.Discard, raw) //nolint:errcheck
+
+	conf := testConf()
+	conf.EnableKeepAlive = false
+	client, err := Client(conn, conf)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	defer client.Close()
+
+	stream, err := client.OpenStream()
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+
+	// Send a data frame header and only half of its body.
+	hdr := header(make([]byte, headerSize))
+	hdr.encode(typeData, flagACK, stream.StreamID(), 10)
+	if _, err := raw.Write(hdr); err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if _, err := raw.Write(make([]byte, 5)); err != nil {
+		t.Fatalf("err: %v", err)
+	}
+
+	if err := stream.SetReadDeadline(time.Now().Add(50 * time.Millisecond)); err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	done := make(chan error, 1)
+	go func() {
+		_, err := stream.Read(make([]byte, 10))
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if err != ErrTimeout {
+			t.Fatalf("expected ErrTimeout, got %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Read did not return at its deadline while a frame body was arriving")
+	}
+}
