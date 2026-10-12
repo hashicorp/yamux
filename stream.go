@@ -145,6 +145,21 @@ START:
 	return n, err
 
 WAIT:
+	// Terminate deterministically once the session is gone. The select below
+	// chooses uniformly among ready cases, so with shutdownCh closed a
+	// lingering (or repeatedly re-signaled) recvNotifyCh token can keep being
+	// chosen over it, sending the loop back through START with no data and no
+	// forward progress: the per-stream state stays streamEstablished until
+	// forceClose runs, and with no read deadline set the loop allocates
+	// nothing, so on single-threaded runtimes (js/wasm) it never yields and
+	// pegs the only thread. Checking after the START buffered-data handling
+	// lets a half-closed stream drain its receive buffer first.
+	select {
+	case <-s.session.shutdownCh:
+		return 0, ErrSessionShutdown
+	default:
+	}
+
 	var timeout <-chan time.Time
 	var timer *time.Timer
 	readDeadline := s.readDeadline.Load().(time.Time)
@@ -155,6 +170,7 @@ WAIT:
 	}
 	select {
 	case <-s.session.shutdownCh:
+		return 0, ErrSessionShutdown
 	case <-s.recvNotifyCh:
 	case <-timeout:
 		return 0, ErrTimeout
@@ -234,6 +250,17 @@ START:
 	return int(max), err
 
 WAIT:
+	// Symmetric to Read: terminate deterministically once the session is
+	// gone. A torn-down session can never refill the send window, so a
+	// lingering sendNotifyCh token chosen over the closed shutdownCh sends
+	// the loop back through START with the window still zero — the same
+	// non-yielding spin.
+	select {
+	case <-s.session.shutdownCh:
+		return 0, ErrSessionShutdown
+	default:
+	}
+
 	var timeout <-chan time.Time
 	var timer *time.Timer
 	writeDeadline := s.writeDeadline.Load().(time.Time)
@@ -244,6 +271,7 @@ WAIT:
 	}
 	select {
 	case <-s.session.shutdownCh:
+		return 0, ErrSessionShutdown
 	case <-s.sendNotifyCh:
 	case <-timeout:
 		return 0, ErrTimeout
