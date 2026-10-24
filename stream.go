@@ -500,25 +500,30 @@ func (s *Stream) readData(hdr header, flags uint16, conn io.Reader) error {
 	// Wrap in a limited reader
 	conn = &io.LimitedReader{R: conn, N: int64(length)}
 
-	// Copy into buffer
+	// Check the receive window before waiting for the frame body. Do not hold
+	// recvLock while reading from the connection: a slow peer must not prevent
+	// Stream.Read from observing its deadline or a session shutdown.
 	s.recvLock.Lock()
-
 	if length > s.recvWindow {
 		s.session.logger.Printf("[ERR] yamux: receive window exceeded (stream: %d, remain: %d, recv: %d)", s.id, s.recvWindow, length)
 		s.recvLock.Unlock()
 		return ErrRecvWindowExceeded
 	}
+	s.recvLock.Unlock()
 
-	if s.recvBuf == nil {
-		// Allocate the receive buffer just-in-time to fit the full data frame.
-		// This way we can read in the whole packet without further allocations.
-		s.recvBuf = bytes.NewBuffer(make([]byte, 0, length))
-	}
-	copiedLength, err := io.Copy(s.recvBuf, conn)
+	frame := make([]byte, length)
+	copiedLength, err := io.ReadFull(conn, frame)
 	if err != nil {
 		s.session.logger.Printf("[ERR] yamux: Failed to read stream data: %v", err)
-		s.recvLock.Unlock()
 		return err
+	}
+
+	// Publish only complete frames to readers.
+	s.recvLock.Lock()
+	if s.recvBuf == nil {
+		s.recvBuf = bytes.NewBuffer(frame)
+	} else {
+		_, _ = s.recvBuf.Write(frame)
 	}
 
 	// Decrement the receive window
