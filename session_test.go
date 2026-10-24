@@ -1072,6 +1072,52 @@ func TestReadDeadline_BlockedRead(t *testing.T) {
 	}
 }
 
+func TestReadDeadlineWhileFrameBodyIsStillArriving(t *testing.T) {
+	session := &Session{
+		logger:     log.New(io.Discard, "", 0),
+		shutdownCh: make(chan struct{}),
+	}
+	stream := newStream(session, 1, streamEstablished)
+	hdr := header(make([]byte, headerSize))
+	hdr.encode(typeData, 0, stream.id, 2)
+
+	r, w := io.Pipe()
+	readDataDone := make(chan error, 1)
+	go func() {
+		readDataDone <- stream.readData(hdr, 0, r)
+	}()
+
+	// Deliver part of the frame, leaving readData blocked on the remainder.
+	if _, err := w.Write([]byte{1}); err != nil {
+		t.Fatalf("write partial frame: %v", err)
+	}
+
+	if err := stream.SetReadDeadline(time.Now().Add(10 * time.Millisecond)); err != nil {
+		t.Fatalf("set read deadline: %v", err)
+	}
+	readDone := make(chan error, 1)
+	go func() {
+		_, err := stream.Read(make([]byte, 1))
+		readDone <- err
+	}()
+
+	select {
+	case err := <-readDone:
+		if err != ErrTimeout {
+			t.Fatalf("expected ErrTimeout; got %v", err)
+		}
+	case <-time.After(250 * time.Millisecond):
+		_ = w.CloseWithError(io.ErrUnexpectedEOF)
+		<-readDataDone
+		t.Fatal("Read remained blocked behind an incomplete frame")
+	}
+
+	_ = w.CloseWithError(io.ErrUnexpectedEOF)
+	if err := <-readDataDone; !errors.Is(err, io.ErrUnexpectedEOF) {
+		t.Fatalf("readData error = %v, want %v", err, io.ErrUnexpectedEOF)
+	}
+}
+
 func TestWriteDeadline(t *testing.T) {
 	client, server := testClientServer(t)
 
