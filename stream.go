@@ -487,12 +487,17 @@ func (s *Stream) incrSendWindow(hdr header, flags uint16) error {
 
 // readData is used to handle a data frame
 func (s *Stream) readData(hdr header, flags uint16, conn io.Reader) error {
-	if err := s.processFlags(flags); err != nil {
+	// Buffer the payload before processing flags: a FIN in the same frame
+	// wakes blocked readers, which must find the data rather than an empty
+	// closed stream.
+	if err := s.copyData(hdr.Length(), conn); err != nil {
 		return err
 	}
+	return s.processFlags(flags)
+}
 
-	// Check that our recv window is not exceeded
-	length := hdr.Length()
+// copyData reads a data frame's payload into the receive buffer.
+func (s *Stream) copyData(length uint32, conn io.Reader) error {
 	if length == 0 {
 		return nil
 	}
@@ -503,6 +508,7 @@ func (s *Stream) readData(hdr header, flags uint16, conn io.Reader) error {
 	// Copy into buffer
 	s.recvLock.Lock()
 
+	// Check that our recv window is not exceeded
 	if length > s.recvWindow {
 		s.session.logger.Printf("[ERR] yamux: receive window exceeded (stream: %d, remain: %d, recv: %d)", s.id, s.recvWindow, length)
 		s.recvLock.Unlock()
