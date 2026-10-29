@@ -479,54 +479,61 @@ func (s *Session) send() {
 
 func (s *Session) sendLoop() error {
 	defer close(s.sendDoneCh)
-	var bodyBuf bytes.Buffer
+	var buf bytes.Buffer
+	batch := make([]*sendReady, 0, maxSendBatch)
 	for {
-		bodyBuf.Reset()
-
 		select {
 		case ready := <-s.sendCh:
-			// Send a header if ready
-			if ready.Hdr != nil {
-				_, err := s.conn.Write(ready.Hdr)
-				if err != nil {
-					s.logger.Printf("[ERR] yamux: Failed to write header: %v", err)
-					asyncSendErr(ready.Err, err)
-					return err
+			buf.Reset()
+			batch = append(batch[:0], ready)
+			appendFrame(&buf, ready)
+			// Frames already queued go out in the same write: one syscall
+			// instead of two per frame, and no frame waits for more.
+		drain:
+			for len(batch) < maxSendBatch && buf.Len() < maxSendBatchBytes {
+				select {
+				case next := <-s.sendCh:
+					batch = append(batch, next)
+					appendFrame(&buf, next)
+				default:
+					break drain
 				}
 			}
 
-			ready.mu.Lock()
-			if ready.Body != nil {
-				// Copy the body into the buffer to avoid
-				// holding a mutex lock during the write.
-				_, err := bodyBuf.Write(ready.Body)
-				if err != nil {
-					ready.Body = nil
-					ready.mu.Unlock()
-					s.logger.Printf("[ERR] yamux: Failed to copy body into buffer: %v", err)
-					asyncSendErr(ready.Err, err)
-					return err
-				}
-				ready.Body = nil
+			_, err := s.conn.Write(buf.Bytes())
+			if err != nil {
+				s.logger.Printf("[ERR] yamux: Failed to write: %v", err)
 			}
-			ready.mu.Unlock()
-
-			if bodyBuf.Len() > 0 {
-				// Send data from a body if given
-				_, err := s.conn.Write(bodyBuf.Bytes())
-				if err != nil {
-					s.logger.Printf("[ERR] yamux: Failed to write body: %v", err)
-					asyncSendErr(ready.Err, err)
-					return err
-				}
+			for _, r := range batch {
+				asyncSendErr(r.Err, err)
 			}
-
-			// No error, successful send
-			asyncSendErr(ready.Err, nil)
+			if err != nil {
+				return err
+			}
 		case <-s.shutdownCh:
 			return nil
 		}
 	}
+}
+
+// Limits on the frames one write of sendLoop carries.
+const (
+	maxSendBatch      = 64
+	maxSendBatchBytes = 256 << 10
+)
+
+// appendFrame copies ready's header and body into buf. The body is copied
+// under its lock, so a sender that gave up may reuse its array.
+func appendFrame(buf *bytes.Buffer, ready *sendReady) {
+	if ready.Hdr != nil {
+		buf.Write(ready.Hdr)
+	}
+	ready.mu.Lock()
+	if ready.Body != nil {
+		buf.Write(ready.Body)
+		ready.Body = nil
+	}
+	ready.mu.Unlock()
 }
 
 // recv is a long running goroutine that accepts new data
