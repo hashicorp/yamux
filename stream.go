@@ -150,19 +150,18 @@ WAIT:
 	readDeadline := s.readDeadline.Load().(time.Time)
 	if !readDeadline.IsZero() {
 		delay := time.Until(readDeadline)
-		timer = time.NewTimer(delay)
+		timer = s.session.getTimer(delay)
 		timeout = timer.C
 	}
 	select {
 	case <-s.session.shutdownCh:
 	case <-s.recvNotifyCh:
 	case <-timeout:
+		s.session.putTimer(timer)
 		return 0, ErrTimeout
 	}
 	if timer != nil {
-		if !timer.Stop() {
-			<-timeout
-		}
+		s.session.putTimer(timer)
 	}
 	goto START
 }
@@ -239,19 +238,18 @@ WAIT:
 	writeDeadline := s.writeDeadline.Load().(time.Time)
 	if !writeDeadline.IsZero() {
 		delay := time.Until(writeDeadline)
-		timer = time.NewTimer(delay)
+		timer = s.session.getTimer(delay)
 		timeout = timer.C
 	}
 	select {
 	case <-s.session.shutdownCh:
 	case <-s.sendNotifyCh:
 	case <-timeout:
+		s.session.putTimer(timer)
 		return 0, ErrTimeout
 	}
 	if timer != nil {
-		if !timer.Stop() {
-			<-timeout
-		}
+		s.session.putTimer(timer)
 	}
 	goto START
 }
