@@ -1775,3 +1775,50 @@ func drainErrorsUntil(t testing.TB, errCh chan error, expect int, timeout time.D
 	}
 	t.Logf("drain took %v (timeout was %v)", time.Since(start), timeout)
 }
+
+func TestStream_ReadDeadline_SlowReadData(t *testing.T) {
+	client, server := testClientServer(t)
+	defer client.Close()
+	defer server.Close()
+
+	stream, err := client.OpenStream()
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+
+	// Set a very short read deadline on stream (50ms)
+	stream.SetReadDeadline(time.Now().Add(50 * time.Millisecond))
+
+	// Simulate slow incoming data frame in readData
+	slowReader, writer := io.Pipe()
+	go func() {
+		time.Sleep(300 * time.Millisecond)
+		writer.Write([]byte("hello"))
+		writer.Close()
+	}()
+
+	hdr := header(make([]byte, headerSize))
+	hdr.encode(typeData, 0, stream.id, 5)
+
+	doneCh := make(chan struct{})
+	go func() {
+		stream.readData(hdr, 0, slowReader)
+		close(doneCh)
+	}()
+
+	// Wait for readData to acquire lock and block on pipe
+	time.Sleep(20 * time.Millisecond)
+
+	readStart := time.Now()
+	buf := make([]byte, 10)
+	_, readErr := stream.Read(buf)
+	readDuration := time.Since(readStart)
+
+	if readErr != ErrTimeout {
+		t.Fatalf("expected ErrTimeout, got %v", readErr)
+	}
+	if readDuration > 150*time.Millisecond {
+		t.Fatalf("Read blocked for %v, expected < 150ms", readDuration)
+	}
+	<-doneCh
+}
