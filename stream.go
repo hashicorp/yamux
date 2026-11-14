@@ -497,32 +497,31 @@ func (s *Stream) readData(hdr header, flags uint16, conn io.Reader) error {
 		return nil
 	}
 
-	// Wrap in a limited reader
-	conn = &io.LimitedReader{R: conn, N: int64(length)}
-
-	// Copy into buffer
+	// Check receive window without holding lock across network read
 	s.recvLock.Lock()
-
 	if length > s.recvWindow {
 		s.session.logger.Printf("[ERR] yamux: receive window exceeded (stream: %d, remain: %d, recv: %d)", s.id, s.recvWindow, length)
 		s.recvLock.Unlock()
 		return ErrRecvWindowExceeded
 	}
+	s.recvLock.Unlock()
 
-	if s.recvBuf == nil {
-		// Allocate the receive buffer just-in-time to fit the full data frame.
-		// This way we can read in the whole packet without further allocations.
-		s.recvBuf = bytes.NewBuffer(make([]byte, 0, length))
-	}
-	copiedLength, err := io.Copy(s.recvBuf, conn)
-	if err != nil {
+	// Read frame body from connection before acquiring recvLock so slow
+	// frame transfers do not block concurrent Stream.Read calls from seeing deadlines or shutdown.
+	buf := make([]byte, length)
+	if _, err := io.ReadFull(conn, buf); err != nil {
 		s.session.logger.Printf("[ERR] yamux: Failed to read stream data: %v", err)
-		s.recvLock.Unlock()
 		return err
 	}
 
-	// Decrement the receive window
-	s.recvWindow -= uint32(copiedLength)
+	// Append to receive buffer under recvLock
+	s.recvLock.Lock()
+	if s.recvBuf == nil {
+		s.recvBuf = bytes.NewBuffer(buf)
+	} else {
+		s.recvBuf.Write(buf)
+	}
+	s.recvWindow -= length
 	s.recvLock.Unlock()
 
 	// Unblock any readers
